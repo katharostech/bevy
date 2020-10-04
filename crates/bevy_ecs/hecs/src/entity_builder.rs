@@ -14,19 +14,19 @@
 
 // modified by Bevy contributors
 
-use crate::alloc::{
-    alloc::{alloc, dealloc, Layout},
-    boxed::Box,
-    vec,
-    vec::Vec,
+use crate::{
+    alloc::{
+        alloc::{alloc, dealloc, Layout},
+        boxed::Box,
+        vec,
+        vec::Vec,
+    },
+    world::ComponentId,
 };
 
 use bevy_utils::HashSet;
-use core::{
-    any::TypeId,
-    mem::{self, MaybeUninit},
-    ptr,
-};
+use core::{intrinsics::copy_nonoverlapping, mem::MaybeUninit, ptr};
+use ptr::slice_from_raw_parts;
 
 use crate::{archetype::TypeInfo, Component, DynamicBundle};
 
@@ -47,8 +47,8 @@ pub struct EntityBuilder {
     storage: Box<[MaybeUninit<u8>]>,
     cursor: usize,
     info: Vec<(TypeInfo, usize)>,
-    ids: Vec<TypeId>,
-    id_set: HashSet<TypeId>,
+    ids: Vec<ComponentId>,
+    id_set: HashSet<ComponentId>,
 }
 
 impl EntityBuilder {
@@ -65,24 +65,43 @@ impl EntityBuilder {
 
     /// Add `component` to the entity
     pub fn add<T: Component>(&mut self, component: T) -> &mut Self {
-        if !self.id_set.insert(TypeId::of::<T>()) {
+        self.add_with_typeinfo(TypeInfo::of::<T>(), unsafe {
+            &*slice_from_raw_parts(
+                &component as *const T as *const u8,
+                std::mem::size_of::<T>(),
+            )
+        });
+        std::mem::forget(component);
+        self
+    }
+
+    /// Add a dynamic component given the component ID, the layout and the raw data slice
+    pub fn add_dynamic(&mut self, id: ComponentId, layout: Layout, data: &[u8]) -> &mut Self {
+        self.add_with_typeinfo(TypeInfo::new_from_id_layout(id, layout), data);
+        self
+    }
+
+    fn add_with_typeinfo(&mut self, type_info: TypeInfo, data: &[u8]) -> &mut Self {
+        debug_assert_eq!(type_info.layout().size(), data.len());
+
+        if !self.id_set.insert(type_info.id()) {
             return self;
         }
-        let end = self.cursor + mem::size_of::<T>();
+        let end = self.cursor + type_info.layout().size();
         if end > self.storage.len() {
             self.grow(end);
         }
-        if mem::size_of::<T>() != 0 {
+        if type_info.layout().size() != 0 {
             unsafe {
-                self.storage
-                    .as_mut_ptr()
-                    .add(self.cursor)
-                    .cast::<T>()
-                    .write_unaligned(component);
+                copy_nonoverlapping(
+                    data.as_ptr(),
+                    self.storage.as_mut_ptr().add(self.cursor) as *mut u8,
+                    data.len(),
+                );
             }
         }
-        self.info.push((TypeInfo::of::<T>(), self.cursor));
-        self.cursor += mem::size_of::<T>();
+        self.info.push((type_info, self.cursor));
+        self.cursor += type_info.layout().size();
         self
     }
 
@@ -166,7 +185,7 @@ pub struct BuiltEntity<'a> {
 }
 
 impl DynamicBundle for BuiltEntity<'_> {
-    fn with_ids<T>(&self, f: impl FnOnce(&[TypeId]) -> T) -> T {
+    fn with_ids<T>(&self, f: impl FnOnce(&[ComponentId]) -> T) -> T {
         f(&self.builder.ids)
     }
 
@@ -175,7 +194,7 @@ impl DynamicBundle for BuiltEntity<'_> {
         self.builder.info.iter().map(|x| x.0).collect()
     }
 
-    unsafe fn put(self, mut f: impl FnMut(*mut u8, TypeId, usize) -> bool) {
+    unsafe fn put(self, mut f: impl FnMut(*mut u8, ComponentId, usize) -> bool) {
         for (ty, offset) in self.builder.info.drain(..) {
             let ptr = self.builder.storage.as_mut_ptr().add(offset).cast();
             if !f(ptr, ty.id(), ty.layout().size()) {

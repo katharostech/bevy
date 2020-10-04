@@ -81,11 +81,14 @@ pub use bundle::{Bundle, DynamicBundle, MissingComponent};
 pub use entities::{Entity, EntityReserver, Location, NoSuchEntity};
 pub use entity_builder::{BuiltEntity, EntityBuilder};
 pub use query::{
-    Access, Added, BatchedIter, Changed, Mut, Mutated, Or, Query, QueryBorrow, QueryIter,
-    ReadOnlyFetch, With, Without,
+    Access, Added, BatchedIter, Changed, DynamicComponentInfo, DynamicComponentQuery,
+    DynamicQueryResult, Mut, Mutated, Or, Query, QueryBorrow, QueryIter, ReadOnlyFetch, With,
+    Without,
 };
 pub use query_one::QueryOne;
-pub use world::{ArchetypesGeneration, Component, ComponentError, SpawnBatchIter, World};
+pub use world::{
+    ArchetypesGeneration, Component, ComponentError, ComponentId, SpawnBatchIter, World,
+};
 
 // Unstable implementation details needed by the macros
 #[doc(hidden)]
