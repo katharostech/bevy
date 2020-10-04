@@ -219,16 +219,20 @@ impl<'a> FetchResource<'a> for FetchDrawContext {
         let mut access = TypeAccess::default();
         access
             .mutable
-            .insert(TypeId::of::<Assets<PipelineDescriptor>>());
-        access.mutable.insert(TypeId::of::<Assets<Shader>>());
-        access.mutable.insert(TypeId::of::<PipelineCompiler>());
+            .insert(TypeId::of::<Assets<PipelineDescriptor>>().into());
+        access.mutable.insert(TypeId::of::<Assets<Shader>>().into());
+        access
+            .mutable
+            .insert(TypeId::of::<PipelineCompiler>().into());
         access
             .immutable
-            .insert(TypeId::of::<Box<dyn RenderResourceContext>>());
+            .insert(TypeId::of::<Box<dyn RenderResourceContext>>().into());
         access
             .immutable
-            .insert(TypeId::of::<VertexBufferDescriptors>());
-        access.immutable.insert(TypeId::of::<SharedBuffers>());
+            .insert(TypeId::of::<VertexBufferDescriptors>().into());
+        access
+            .immutable
+            .insert(TypeId::of::<SharedBuffers>().into());
         access
     }
 }

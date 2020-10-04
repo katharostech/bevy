@@ -1,8 +1,8 @@
 use crate::resource::Resources;
-use bevy_hecs::{Access, Query, World};
+use bevy_hecs::{Access, ComponentId, Query, World};
 use bevy_utils::HashSet;
 use fixedbitset::FixedBitSet;
-use std::{any::TypeId, borrow::Cow};
+use std::borrow::Cow;
 
 /// Determines the strategy used to run the `run_thread_local` function in a [System]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -82,8 +82,8 @@ impl ArchetypeAccess {
 /// Provides information about the types a [System] reads and writes
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct TypeAccess {
-    pub immutable: HashSet<TypeId>,
-    pub mutable: HashSet<TypeId>,
+    pub immutable: HashSet<ComponentId>,
+    pub mutable: HashSet<ComponentId>,
 }
 
 impl TypeAccess {
@@ -146,9 +146,9 @@ mod tests {
         let access =
             <<(Res<A>, ResMut<B>, Res<C>) as ResourceQuery>::Fetch as FetchResource>::access();
         let mut expected_access = TypeAccess::default();
-        expected_access.immutable.insert(TypeId::of::<A>());
-        expected_access.immutable.insert(TypeId::of::<C>());
-        expected_access.mutable.insert(TypeId::of::<B>());
+        expected_access.immutable.insert(TypeId::of::<A>().into());
+        expected_access.immutable.insert(TypeId::of::<C>().into());
+        expected_access.mutable.insert(TypeId::of::<B>().into());
         assert_eq!(access, expected_access);
     }
 }

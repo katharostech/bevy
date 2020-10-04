@@ -221,7 +221,7 @@ impl<'a, T: Resource> FetchResource<'a> for FetchResourceRead<T> {
 
     fn access() -> TypeAccess {
         let mut access = TypeAccess::default();
-        access.immutable.insert(TypeId::of::<T>());
+        access.immutable.insert(TypeId::of::<T>().into());
         access
     }
 }
@@ -256,7 +256,7 @@ impl<'a, T: Resource> FetchResource<'a> for FetchResourceChanged<T> {
 
     fn access() -> TypeAccess {
         let mut access = TypeAccess::default();
-        access.immutable.insert(TypeId::of::<T>());
+        access.immutable.insert(TypeId::of::<T>().into());
         access
     }
 }
@@ -288,7 +288,7 @@ impl<'a, T: Resource> FetchResource<'a> for FetchResourceWrite<T> {
 
     fn access() -> TypeAccess {
         let mut access = TypeAccess::default();
-        access.mutable.insert(TypeId::of::<T>());
+        access.mutable.insert(TypeId::of::<T>().into());
         access
     }
 }
@@ -330,7 +330,7 @@ impl<'a, T: Resource + FromResources> FetchResource<'a> for FetchResourceLocalMu
 
     fn access() -> TypeAccess {
         let mut access = TypeAccess::default();
-        access.mutable.insert(TypeId::of::<T>());
+        access.mutable.insert(TypeId::of::<T>().into());
         access
     }
 }
