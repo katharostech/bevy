@@ -19,11 +19,12 @@ use crate::{
         alloc::{alloc, dealloc, Layout},
         vec::Vec,
     },
+    world::ComponentId,
     Entity,
 };
 use bevy_utils::{HashMap, HashMapExt};
 use core::{
-    any::{type_name, TypeId},
+    any::TypeId,
     cell::UnsafeCell,
     mem,
     ptr::{self, NonNull},
@@ -38,7 +39,7 @@ use crate::{borrow::AtomicBorrow, query::Fetch, Access, Component, Query};
 #[derive(Debug)]
 pub struct Archetype {
     types: Vec<TypeInfo>,
-    state: HashMap<TypeId, TypeState>,
+    state: HashMap<ComponentId, TypeState>,
     len: usize,
     entities: Vec<Entity>,
     // UnsafeCell allows unique references into `data` to be constructed while shared references
@@ -93,23 +94,23 @@ impl Archetype {
     #[allow(missing_docs)]
     #[inline]
     pub fn has<T: Component>(&self) -> bool {
-        self.has_dynamic(TypeId::of::<T>())
+        self.has_dynamic(TypeId::of::<T>().into())
     }
 
     #[allow(missing_docs)]
     #[inline]
-    pub fn has_type(&self, ty: TypeId) -> bool {
+    pub fn has_component(&self, ty: ComponentId) -> bool {
         self.has_dynamic(ty)
     }
 
-    pub(crate) fn has_dynamic(&self, id: TypeId) -> bool {
+    pub(crate) fn has_dynamic(&self, id: ComponentId) -> bool {
         self.state.contains_key(&id)
     }
 
     #[allow(missing_docs)]
     #[inline]
     pub fn get<T: Component>(&self) -> Option<NonNull<T>> {
-        let state = self.state.get(&TypeId::of::<T>())?;
+        let state = self.state.get(&TypeId::of::<T>().into())?;
         Some(unsafe {
             NonNull::new_unchecked(
                 (*self.data.get()).as_ptr().add(state.offset).cast::<T>() as *mut T
@@ -120,7 +121,7 @@ impl Archetype {
     #[allow(missing_docs)]
     #[inline]
     pub fn get_with_type_state<T: Component>(&self) -> Option<(NonNull<T>, &TypeState)> {
-        let state = self.state.get(&TypeId::of::<T>())?;
+        let state = self.state.get(&TypeId::of::<T>().into())?;
         Some(unsafe {
             (
                 NonNull::new_unchecked(
@@ -132,43 +133,57 @@ impl Archetype {
     }
 
     #[allow(missing_docs)]
-    pub fn get_type_state(&self, ty: TypeId) -> Option<&TypeState> {
+    pub fn get_type_state(&self, ty: ComponentId) -> Option<&TypeState> {
         self.state.get(&ty)
     }
 
     #[allow(missing_docs)]
-    pub fn get_type_state_mut(&mut self, ty: TypeId) -> Option<&mut TypeState> {
+    pub fn get_type_state_mut(&mut self, ty: ComponentId) -> Option<&mut TypeState> {
         self.state.get_mut(&ty)
     }
 
     #[allow(missing_docs)]
     #[inline]
     pub fn borrow<T: Component>(&self) {
-        if self
-            .state
-            .get(&TypeId::of::<T>())
-            .map_or(false, |x| !x.borrow.borrow())
-        {
-            panic!("{} already borrowed uniquely", type_name::<T>());
+        self.borrow_component(std::any::TypeId::of::<T>().into())
+    }
+
+    #[allow(missing_docs)]
+    #[inline]
+    pub fn borrow_component(&self, id: ComponentId) {
+        if self.state.get(&id).map_or(false, |x| !x.borrow.borrow()) {
+            panic!("{:?} already borrowed uniquely", id);
         }
     }
 
     #[allow(missing_docs)]
     #[inline]
     pub fn borrow_mut<T: Component>(&self) {
+        self.borrow_component_mut(std::any::TypeId::of::<T>().into())
+    }
+
+    #[allow(missing_docs)]
+    #[inline]
+    pub fn borrow_component_mut(&self, id: ComponentId) {
         if self
             .state
-            .get(&TypeId::of::<T>())
+            .get(&id)
             .map_or(false, |x| !x.borrow.borrow_mut())
         {
-            panic!("{} already borrowed", type_name::<T>());
+            panic!("{:?} already borrowed", id);
         }
     }
 
     #[allow(missing_docs)]
     #[inline]
     pub fn release<T: Component>(&self) {
-        if let Some(x) = self.state.get(&TypeId::of::<T>()) {
+        self.release_component(std::any::TypeId::of::<T>().into());
+    }
+
+    #[allow(missing_docs)]
+    #[inline]
+    pub fn release_component(&self, id: ComponentId) {
+        if let Some(x) = self.state.get(&id) {
             x.borrow.release();
         }
     }
@@ -176,7 +191,13 @@ impl Archetype {
     #[allow(missing_docs)]
     #[inline]
     pub fn release_mut<T: Component>(&self) {
-        if let Some(x) = self.state.get(&TypeId::of::<T>()) {
+        self.release_component_mut(std::any::TypeId::of::<T>().into())
+    }
+
+    #[allow(missing_docs)]
+    #[inline]
+    pub fn release_component_mut(&self, id: ComponentId) {
+        if let Some(x) = self.state.get(&id) {
             x.borrow.release_mut();
         }
     }
@@ -216,7 +237,7 @@ impl Archetype {
     /// `index` must be in-bounds
     pub(crate) unsafe fn get_dynamic(
         &self,
-        ty: TypeId,
+        ty: ComponentId,
         size: usize,
         index: usize,
     ) -> Option<NonNull<u8>> {
@@ -356,7 +377,7 @@ impl Archetype {
     pub(crate) unsafe fn move_to(
         &mut self,
         index: usize,
-        mut f: impl FnMut(*mut u8, TypeId, usize, bool, bool),
+        mut f: impl FnMut(*mut u8, ComponentId, usize, bool, bool),
     ) -> Option<Entity> {
         let last = self.len - 1;
         for ty in &self.types {
@@ -400,7 +421,7 @@ impl Archetype {
     pub unsafe fn put_dynamic(
         &mut self,
         component: *mut u8,
-        ty: TypeId,
+        ty: ComponentId,
         size: usize,
         index: usize,
         added: bool,
@@ -484,7 +505,7 @@ impl TypeState {
 /// Metadata required to store a component
 #[derive(Debug, Copy, Clone)]
 pub struct TypeInfo {
-    id: TypeId,
+    id: ComponentId,
     layout: Layout,
     drop: unsafe fn(*mut u8),
 }
@@ -497,7 +518,7 @@ impl TypeInfo {
         }
 
         Self {
-            id: TypeId::of::<T>(),
+            id: TypeId::of::<T>().into(),
             layout: Layout::new::<T>(),
             drop: drop_ptr::<T>,
         }
@@ -505,7 +526,7 @@ impl TypeInfo {
 
     #[allow(missing_docs)]
     #[inline]
-    pub fn id(&self) -> TypeId {
+    pub fn id(&self) -> ComponentId {
         self.id
     }
 
@@ -527,7 +548,7 @@ impl PartialOrd for TypeInfo {
 }
 
 impl Ord for TypeInfo {
-    /// Order by alignment, descending. Ties broken with TypeId.
+    /// Order by alignment, descending. Ties broken with ComponentId.
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.layout
             .align()
