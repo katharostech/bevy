@@ -28,7 +28,12 @@ impl Scene {
                     })
                 }
                 for type_info in archetype.types() {
-                    if let Some(component_registration) = component_registry.get(&type_info.id()) {
+                    if let Some(component_registration) =
+                        component_registry.get(&match type_info.id() {
+                            bevy_ecs::ComponentId::RustTypeId(id) => id,
+                            _ => todo!("Handle external ids in component registry"),
+                        })
+                    {
                         let properties =
                             component_registration.get_component_properties(&archetype, index);
 

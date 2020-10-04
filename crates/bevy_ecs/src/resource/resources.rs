@@ -104,7 +104,7 @@ impl Resources {
             let resource_ptr = (&mut resource as *mut T).cast::<u8>();
             archetype.put_dynamic(
                 resource_ptr,
-                type_id,
+                type_id.into(),
                 core::mem::size_of::<T>(),
                 index,
                 added,
@@ -203,7 +203,7 @@ impl Resources {
     ) -> (NonNull<bool>, NonNull<bool>) {
         self.get_resource_data_index::<T>(resource_index)
             .and_then(|(data, index)| {
-                let type_state = data.archetype.get_type_state(TypeId::of::<T>())?;
+                let type_state = data.archetype.get_type_state(TypeId::of::<T>().into())?;
                 Some((
                     NonNull::new_unchecked(type_state.added().as_ptr().add(index)),
                     NonNull::new_unchecked(type_state.mutated().as_ptr().add(index)),

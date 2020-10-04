@@ -85,7 +85,9 @@ pub use query::{
     ReadOnlyFetch, With, Without,
 };
 pub use query_one::QueryOne;
-pub use world::{ArchetypesGeneration, Component, ComponentError, SpawnBatchIter, World};
+pub use world::{
+    ArchetypesGeneration, Component, ComponentError, ComponentId, SpawnBatchIter, World,
+};
 
 // Unstable implementation details needed by the macros
 #[doc(hidden)]

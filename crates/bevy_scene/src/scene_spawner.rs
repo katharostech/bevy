@@ -111,7 +111,7 @@ impl SceneSpawner {
                     .ok_or(SceneSpawnError::UnregisteredComponent {
                         type_name: component.type_name.to_string(),
                     })?;
-                if world.has_component_type(entity, component_registration.ty) {
+                if world.has_component_type(entity, component_registration.ty.into()) {
                     if component.type_name != "Camera" {
                         component_registration.apply_component_to_entity(world, entity, component);
                     }
