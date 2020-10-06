@@ -439,7 +439,7 @@ impl Archetype {
 
     /// How, if at all, `Q` will access entities in this archetype
     pub fn access<Q: Query>(&self) -> Option<Access> {
-        Q::Fetch::access(self)
+        Q::Fetch::access(self, &Default::default())
     }
 }
 

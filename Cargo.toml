@@ -207,6 +207,10 @@ name = "hierarchy"
 path = "examples/ecs/hierarchy.rs"
 
 [[example]]
+name = "dynamic_systems"
+path = "examples/ecs/dynamic_systems.rs"
+
+[[example]]
 name = "breakout"
 path = "examples/game/breakout.rs"
 

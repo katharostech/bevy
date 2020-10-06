@@ -924,6 +924,12 @@ pub enum ComponentId {
     ExternalId(u64),
 }
 
+impl Default for ComponentId {
+    fn default() -> Self {
+        ComponentId::ExternalId(std::u64::MAX)
+    }
+}
+
 impl Ord for ComponentId {
     fn cmp(&self, other: &Self) -> Ordering {
         if self == other {

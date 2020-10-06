@@ -195,11 +195,11 @@ impl<'w, Q: HecsQuery> QueryBorrowChecked<'w, Q> {
         }
 
         for index in self.archetype_access.immutable.ones() {
-            Q::Fetch::borrow(&self.archetypes[index]);
+            Q::Fetch::borrow(&self.archetypes[index], &Default::default());
         }
 
         for index in self.archetype_access.mutable.ones() {
-            Q::Fetch::borrow(&self.archetypes[index]);
+            Q::Fetch::borrow(&self.archetypes[index], &Default::default());
         }
 
         self.borrowed = true;
@@ -214,11 +214,11 @@ impl<'w, Q: HecsQuery> Drop for QueryBorrowChecked<'w, Q> {
     fn drop(&mut self) {
         if self.borrowed {
             for index in self.archetype_access.immutable.ones() {
-                Q::Fetch::release(&self.archetypes[index]);
+                Q::Fetch::release(&self.archetypes[index], &Default::default());
             }
 
             for index in self.archetype_access.mutable.ones() {
-                Q::Fetch::release(&self.archetypes[index]);
+                Q::Fetch::release(&self.archetypes[index], &Default::default());
             }
         }
     }
@@ -255,9 +255,11 @@ impl<'q, 'w, Q: HecsQuery> Iterator for QueryIter<'q, 'w, Q> {
                     let archetype = self.borrow.archetypes.get(self.archetype_index as usize)?;
                     self.archetype_index += 1;
                     unsafe {
-                        self.iter = Q::Fetch::get(archetype, 0).map(|fetch| ChunkIter {
-                            fetch,
-                            len: archetype.len(),
+                        self.iter = Q::Fetch::get(archetype, 0, &Default::default()).map(|fetch| {
+                            ChunkIter {
+                                fetch,
+                                len: archetype.len(),
+                            }
                         });
                     }
                 }
@@ -285,7 +287,7 @@ impl<'q, 'w, Q: HecsQuery> ExactSizeIterator for QueryIter<'q, 'w, Q> {
         self.borrow
             .archetypes
             .iter()
-            .filter(|&x| Q::Fetch::access(x).is_some())
+            .filter(|&x| Q::Fetch::access(x, &Default::default()).is_some())
             .map(|x| x.len())
             .sum()
     }
@@ -305,13 +307,13 @@ impl<Q: HecsQuery> ChunkIter<Q> {
             }
 
             self.len -= 1;
-            if self.fetch.should_skip() {
+            if self.fetch.should_skip(&Default::default()) {
                 // we still need to progress the iterator
-                let _ = self.fetch.next();
+                let _ = self.fetch.next(&Default::default());
                 continue;
             }
 
-            break Some(self.fetch.next());
+            break Some(self.fetch.next(&Default::default()));
         }
     }
 }
@@ -336,7 +338,9 @@ impl<'q, 'w, Q: HecsQuery> ParallelIterator<Batch<'q, Q>> for ParIter<'q, 'w, Q>
                 self.batch = 0;
                 continue;
             }
-            if let Some(fetch) = unsafe { Q::Fetch::get(archetype, offset as usize) } {
+            if let Some(fetch) =
+                unsafe { Q::Fetch::get(archetype, offset as usize, &Default::default()) }
+            {
                 self.batch += 1;
                 return Some(Batch {
                     _marker: PhantomData,
@@ -405,10 +409,11 @@ impl<'a, Q: HecsQuery> QueryOneChecked<'a, Q> {
     /// pre-existing borrow.
     pub fn get(&mut self) -> Option<<Q::Fetch as Fetch<'_>>::Item> {
         unsafe {
-            let mut fetch = Q::Fetch::get(self.archetype, self.index as usize)?;
+            let mut fetch =
+                Q::Fetch::get(self.archetype, self.index as usize, &Default::default())?;
             self.borrowed = true;
-            Q::Fetch::borrow(self.archetype);
-            Some(fetch.next())
+            Q::Fetch::borrow(self.archetype, &Default::default());
+            Some(fetch.next(&Default::default()))
         }
     }
 
@@ -440,7 +445,7 @@ impl<'a, Q: HecsQuery> QueryOneChecked<'a, Q> {
 impl<Q: HecsQuery> Drop for QueryOneChecked<'_, Q> {
     fn drop(&mut self) {
         if self.borrowed {
-            Q::Fetch::release(self.archetype);
+            Q::Fetch::release(self.archetype, &Default::default());
         }
     }
 }
