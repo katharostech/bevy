@@ -155,7 +155,8 @@ macro_rules! impl_into_query_system {
                     $(<<$resource as ResourceQuery>::Fetch as FetchResource>::Item,)*
                     $(Query<$query>,)*) +
                 Send + Sync +'static,
-            $($query: HecsQuery,)*
+            $($query: HecsQuery,
+              $query::Fetch: for<'a> Fetch<'a, State = ()>,)*
             $($resource: ResourceQuery,)*
         {
             #[allow(non_snake_case)]
