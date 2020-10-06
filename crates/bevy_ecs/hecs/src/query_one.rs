@@ -36,11 +36,11 @@ impl<'a, Q: Query> QueryOne<'a, Q> {
     /// pre-existing borrow.
     pub fn get(&mut self) -> Option<<Q::Fetch as Fetch<'_>>::Item> {
         unsafe {
-            let mut fetch = Q::Fetch::get(self.archetype, self.index)?;
-            if fetch.should_skip() {
+            let mut fetch = Q::Fetch::get(self.archetype, self.index, &Default::default())?;
+            if fetch.should_skip(&Default::default()) {
                 None
             } else {
-                Some(fetch.next())
+                Some(fetch.next(&Default::default()))
             }
         }
     }
@@ -107,11 +107,11 @@ where
         Q::Fetch: ReadOnlyFetch,
     {
         unsafe {
-            let mut fetch = Q::Fetch::get(self.archetype, self.index)?;
-            if fetch.should_skip() {
+            let mut fetch = Q::Fetch::get(self.archetype, self.index, &Default::default())?;
+            if fetch.should_skip(&Default::default()) {
                 None
             } else {
-                Some(fetch.next())
+                Some(fetch.next(&Default::default()))
             }
         }
     }
