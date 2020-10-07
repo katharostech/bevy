@@ -25,7 +25,7 @@ use crate::{archetype::Archetype, Component, Entity, MissingComponent};
 /// A collection of component types to fetch from a `World`
 pub trait Query {
     #[doc(hidden)]
-    type Fetch: for<'a> Fetch<'a, State=()>;
+    type Fetch: for<'a> Fetch<'a>;
 }
 
 /// A fetch that is read only. This should only be implemented for read-only fetches.
@@ -36,7 +36,7 @@ pub trait Fetch<'a>: Sized {
     /// Type of value to be fetched
     type Item;
     /// A type to store state that is needed to `access`, `borrow` or `release`.
-    type State;
+    type State: Default;
 
     /// How this query will access `archetype`, if at all
     fn access(archetype: &Archetype, state: &Self::State) -> Option<Access>;
@@ -273,44 +273,44 @@ macro_rules! impl_or_query {
             type Fetch = FetchOr<($( $T::Fetch ),+)>;
         }
 
-        impl<'a, $( $T: Fetch<'a, State=()> ),+> Fetch<'a> for FetchOr<($( $T ),+)> {
+        impl<'a, $( $T: Fetch<'a> ),+> Fetch<'a> for FetchOr<($( $T ),+)> {
             type Item = ($( $T::Item ),+);
             type State = ();
 
             fn access(archetype: &Archetype, _: &Self::State) -> Option<Access> {
                 let mut max_access = None;
                 $(
-                max_access = max_access.max($T::access(archetype, &()));
+                max_access = max_access.max($T::access(archetype, &Default::default()));
                 )+
                 max_access
             }
 
             fn borrow(archetype: &Archetype, _: &Self::State) {
                 $(
-                    $T::borrow(archetype, &());
+                    $T::borrow(archetype, &Default::default());
                  )+
             }
 
             unsafe fn get(archetype: &'a Archetype, offset: usize, _: &Self::State) -> Option<Self> {
-                Some(Self(( $( $T::get(archetype, offset, &())?),+ )))
+                Some(Self(( $( $T::get(archetype, offset, &Default::default())?),+ )))
             }
 
             fn release(archetype: &Archetype, _: &Self::State) {
                 $(
-                    $T::release(archetype, &());
+                    $T::release(archetype, &Default::default());
                  )+
             }
 
             #[allow(non_snake_case)]
             unsafe fn next(&mut self, _: &Self::State) -> Self::Item {
                 let ($( $T ),+) = &mut self.0;
-                ($( $T.next(&()) ),+)
+                ($( $T.next(&Default::default()) ),+)
             }
 
              #[allow(non_snake_case)]
             unsafe fn should_skip(&self, _: &Self::State) -> bool {
                 let ($( $T ),+) = &self.0;
-                true $( && $T.should_skip(&()) )+
+                true $( && $T.should_skip(&Default::default()) )+
             }
         }
     };
@@ -559,34 +559,34 @@ impl<'a, T: Component> Fetch<'a> for FetchChanged<T> {
 pub struct TryFetch<T>(Option<T>);
 unsafe impl<T> ReadOnlyFetch for TryFetch<T> where T: ReadOnlyFetch {}
 
-impl<'a, T: Fetch<'a, State=()>> Fetch<'a> for TryFetch<T> {
+impl<'a, T: Fetch<'a>> Fetch<'a> for TryFetch<T> {
     type Item = Option<T::Item>;
     type State = ();
 
     fn access(archetype: &Archetype, _: &Self::State) -> Option<Access> {
-        Some(T::access(archetype, &()).unwrap_or(Access::Iterate))
+        Some(T::access(archetype, &Default::default()).unwrap_or(Access::Iterate))
     }
 
     fn borrow(archetype: &Archetype, _: &Self::State) {
-        T::borrow(archetype, &())
+        T::borrow(archetype, &Default::default())
     }
 
     unsafe fn get(archetype: &'a Archetype, offset: usize, _: &Self::State) -> Option<Self> {
-        Some(Self(T::get(archetype, offset, &())))
+        Some(Self(T::get(archetype, offset, &Default::default())))
     }
 
     fn release(archetype: &Archetype, _: &Self::State) {
-        T::release(archetype, &())
+        T::release(archetype, &Default::default())
     }
 
     unsafe fn next(&mut self, _: &Self::State) -> Option<T::Item> {
-        Some(self.0.as_mut()?.next(&()))
+        Some(self.0.as_mut()?.next(&Default::default()))
     }
 
     unsafe fn should_skip(&self, _: &Self::State) -> bool {
         self.0
             .as_ref()
-            .map_or(false, |fetch| fetch.should_skip(&()))
+            .map_or(false, |fetch| fetch.should_skip(&Default::default()))
     }
 }
 
@@ -620,7 +620,7 @@ unsafe impl<'a, T: Component, F: Fetch<'a>> ReadOnlyFetch for FetchWithout<T, F>
 {
 }
 
-impl<'a, T: Component, F: Fetch<'a, State=()>> Fetch<'a> for FetchWithout<T, F> {
+impl<'a, T: Component, F: Fetch<'a>> Fetch<'a> for FetchWithout<T, F> {
     type Item = F::Item;
     type State = ();
 
@@ -628,12 +628,12 @@ impl<'a, T: Component, F: Fetch<'a, State=()>> Fetch<'a> for FetchWithout<T, F> 
         if archetype.has::<T>() {
             None
         } else {
-            F::access(archetype, &())
+            F::access(archetype, &Default::default())
         }
     }
 
     fn borrow(archetype: &Archetype, _: &Self::State) {
-        F::borrow(archetype, &())
+        F::borrow(archetype, &Default::default())
     }
 
     unsafe fn get(archetype: &'a Archetype, offset: usize, _: &Self::State) -> Option<Self> {
@@ -641,21 +641,21 @@ impl<'a, T: Component, F: Fetch<'a, State=()>> Fetch<'a> for FetchWithout<T, F> 
             return None;
         }
         Some(Self(
-            F::get(archetype, offset, &())?,
+            F::get(archetype, offset, &Default::default())?,
             PhantomData,
         ))
     }
 
     fn release(archetype: &Archetype, _: &Self::State) {
-        F::release(archetype, &())
+        F::release(archetype, &Default::default())
     }
 
     unsafe fn next(&mut self, _: &Self::State) -> F::Item {
-        self.0.next(&())
+        self.0.next(&Default::default())
     }
 
     unsafe fn should_skip(&self, _: &Self::State) -> bool {
-        self.0.should_skip(&())
+        self.0.should_skip(&Default::default())
     }
 }
 
@@ -688,20 +688,20 @@ impl<T: Component, Q: Query> Query for With<T, Q> {
 pub struct FetchWith<T, F>(F, PhantomData<fn(T)>);
 unsafe impl<'a, T: Component, F: Fetch<'a>> ReadOnlyFetch for FetchWith<T, F> where F: ReadOnlyFetch {}
 
-impl<'a, T: Component, F: Fetch<'a, State=()>> Fetch<'a> for FetchWith<T, F> {
+impl<'a, T: Component, F: Fetch<'a>> Fetch<'a> for FetchWith<T, F> {
     type Item = F::Item;
     type State = ();
 
     fn access(archetype: &Archetype, _: &Self::State) -> Option<Access> {
         if archetype.has::<T>() {
-            F::access(archetype, &())
+            F::access(archetype, &Default::default())
         } else {
             None
         }
     }
 
     fn borrow(archetype: &Archetype, _: &Self::State) {
-        F::borrow(archetype, &())
+        F::borrow(archetype, &Default::default())
     }
 
     unsafe fn get(archetype: &'a Archetype, offset: usize, _: &Self::State) -> Option<Self> {
@@ -709,21 +709,21 @@ impl<'a, T: Component, F: Fetch<'a, State=()>> Fetch<'a> for FetchWith<T, F> {
             return None;
         }
         Some(Self(
-            F::get(archetype, offset, &())?,
+            F::get(archetype, offset, &Default::default())?,
             PhantomData,
         ))
     }
 
     fn release(archetype: &Archetype, _: &Self::State) {
-        F::release(archetype, &())
+        F::release(archetype, &Default::default())
     }
 
     unsafe fn next(&mut self, _: &Self::State) -> F::Item {
-        self.0.next(&())
+        self.0.next(&Default::default())
     }
 
     unsafe fn should_skip(&self, _: &Self::State) -> bool {
-        self.0.should_skip(&())
+        self.0.should_skip(&Default::default())
     }
 }
 
@@ -874,7 +874,7 @@ impl<'q, 'w, Q: Query> Iterator for QueryIter<'q, 'w, Q> {
                     let archetype = self.borrow.archetypes.get(self.archetype_index)?;
                     self.archetype_index += 1;
                     unsafe {
-                        self.iter = Q::Fetch::get(archetype, 0, &()).map(|fetch| ChunkIter {
+                        self.iter = Q::Fetch::get(archetype, 0, &Default::default()).map(|fetch| ChunkIter {
                             fetch,
                             len: archetype.len(),
                         });
@@ -904,7 +904,7 @@ impl<'q, 'w, Q: Query> ExactSizeIterator for QueryIter<'q, 'w, Q> {
         self.borrow
             .archetypes
             .iter()
-            .filter(|&x| Q::Fetch::access(x, &()).is_some())
+            .filter(|&x| Q::Fetch::access(x, &Default::default()).is_some())
             .map(|x| x.len())
             .sum()
     }
@@ -923,13 +923,13 @@ impl<Q: Query> ChunkIter<Q> {
             }
 
             self.len -= 1;
-            if self.fetch.should_skip(&()) {
+            if self.fetch.should_skip(&Default::default()) {
                 // we still need to progress the iterator
-                let _ = self.fetch.next(&());
+                let _ = self.fetch.next(&Default::default());
                 continue;
             }
 
-            break Some(self.fetch.next(&()));
+            break Some(self.fetch.next(&Default::default()));
         }
     }
 }
@@ -957,7 +957,7 @@ impl<'q, 'w, Q: Query> Iterator for BatchedIter<'q, 'w, Q> {
                 self.batch = 0;
                 continue;
             }
-            if let Some(fetch) = unsafe { Q::Fetch::get(archetype, offset, &()) } {
+            if let Some(fetch) = unsafe { Q::Fetch::get(archetype, offset, &Default::default()) } {
                 self.batch += 1;
                 return Some(Batch {
                     _marker: PhantomData,
@@ -998,7 +998,7 @@ unsafe impl<'q, Q: Query> Sync for Batch<'q, Q> {}
 
 macro_rules! tuple_impl {
     ($($name: ident),*) => {
-        impl<'a, $($name: Fetch<'a, State=()>),*> Fetch<'a> for ($($name,)*) {
+        impl<'a, $($name: Fetch<'a>),*> Fetch<'a> for ($($name,)*) {
             type Item = ($($name::Item,)*);
             type State = ();
 
@@ -1006,35 +1006,35 @@ macro_rules! tuple_impl {
             fn access(archetype: &Archetype, _: &Self::State) -> Option<Access> {
                 let mut access = Access::Iterate;
                 $(
-                    access = access.max($name::access(archetype, &())?);
+                    access = access.max($name::access(archetype, &Default::default())?);
                 )*
                 Some(access)
             }
 
             #[allow(unused_variables)]
             fn borrow(archetype: &Archetype, _: &Self::State) {
-                $($name::borrow(archetype, &());)*
+                $($name::borrow(archetype, &Default::default());)*
             }
             #[allow(unused_variables)]
             unsafe fn get(archetype: &'a Archetype, offset: usize, _: &Self::State) -> Option<Self> {
-                Some(($($name::get(archetype, offset, &())?,)*))
+                Some(($($name::get(archetype, offset, &Default::default())?,)*))
             }
             #[allow(unused_variables)]
             fn release(archetype: &Archetype, _: &Self::State) {
-                $($name::release(archetype, &());)*
+                $($name::release(archetype, &Default::default());)*
             }
 
             #[allow(unused_variables)]
             unsafe fn next(&mut self, _: &Self::State) -> Self::Item {
                 #[allow(non_snake_case)]
                 let ($($name,)*) = self;
-                ($($name.next(&()),)*)
+                ($($name.next(&Default::default()),)*)
             }
 
             unsafe fn should_skip(&self, _: &Self::State) -> bool {
                 #[allow(non_snake_case)]
                 let ($($name,)*) = self;
-                $($name.should_skip(&())||)* false
+                $($name.should_skip(&Default::default())||)* false
             }
         }
 
