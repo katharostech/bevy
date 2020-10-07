@@ -25,7 +25,7 @@ use crate::{archetype::Archetype, Component, Entity, MissingComponent};
 /// A collection of component types to fetch from a `World`
 pub trait Query {
     #[doc(hidden)]
-    type Fetch: for<'a> Fetch<'a>;
+    type Fetch: for<'a> Fetch<'a, State=()>;
 }
 
 /// A fetch that is read only. This should only be implemented for read-only fetches.

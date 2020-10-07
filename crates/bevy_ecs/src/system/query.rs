@@ -11,6 +11,7 @@ use std::marker::PhantomData;
 pub struct Query<'a, Q: HecsQuery> {
     pub(crate) world: &'a World,
     pub(crate) archetype_access: &'a ArchetypeAccess,
+    state: &'static (),
     _marker: PhantomData<Q>,
 }
 
@@ -23,19 +24,23 @@ pub enum QueryError {
     NoSuchEntity,
 }
 
-impl<'a, Q: HecsQuery> Query<'a, Q> {
+impl<'w, Q: HecsQuery> Query<'w, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     #[inline]
-    pub fn new(world: &'a World, archetype_access: &'a ArchetypeAccess) -> Self {
+    pub fn new(world: &'w World, archetype_access: &'w ArchetypeAccess) -> Self {
         Self {
             world,
             archetype_access,
+            state: &(),
             _marker: PhantomData::default(),
         }
     }
 
     #[inline]
-    pub fn iter(&mut self) -> QueryBorrowChecked<'_, Q> {
-        QueryBorrowChecked::new(&self.world.archetypes, self.archetype_access)
+    pub fn iter(&mut self) -> QueryBorrowChecked<'w, 'static, (), Q::Fetch> {
+        QueryBorrowChecked::new(&self.world.archetypes, self.archetype_access, &self.state)
     }
 
     // TODO: find a way to make `iter`, `get`, `get_mut`, and `entity` safe without using tracking pointers with global locks
@@ -133,19 +138,27 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
 /// A borrow of a `World` sufficient to execute the query `Q`
 ///
 /// Note that borrows are not released until this object is dropped.
-pub struct QueryBorrowChecked<'w, Q: HecsQuery> {
+pub struct QueryBorrowChecked<'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> {
     archetypes: &'w [Archetype],
     archetype_access: &'w ArchetypeAccess,
+    state: &'s S,
     borrowed: bool,
-    _marker: PhantomData<Q>,
+    _marker: PhantomData<F>,
 }
 
-impl<'w, Q: HecsQuery> QueryBorrowChecked<'w, Q> {
-    pub(crate) fn new(archetypes: &'w [Archetype], archetype_access: &'w ArchetypeAccess) -> Self {
+impl<'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>>
+    QueryBorrowChecked<'w, 's, S, F>
+{
+    pub(crate) fn new(
+        archetypes: &'w [Archetype],
+        archetype_access: &'w ArchetypeAccess,
+        state: &'s S,
+    ) -> Self {
         Self {
             archetypes,
             borrowed: false,
             archetype_access,
+            state,
             _marker: PhantomData,
         }
     }
@@ -154,7 +167,7 @@ impl<'w, Q: HecsQuery> QueryBorrowChecked<'w, Q> {
     ///
     /// Must be called only once per query.
     #[inline]
-    pub fn iter<'q>(&'q mut self) -> QueryIter<'q, 'w, Q> {
+    pub fn iter<'q>(&'q mut self) -> QueryIter<'q, 'w, 's, S, F> {
         self.borrow();
         QueryIter {
             borrow: self,
@@ -177,7 +190,7 @@ impl<'w, Q: HecsQuery> QueryBorrowChecked<'w, Q> {
     /// each batch could take longer than running the batch. On the other
     /// hand, a too large batch size risks that one batch is still running
     /// long after the rest have finished.
-    pub fn par_iter<'q>(&'q mut self, batch_size: usize) -> ParIter<'q, 'w, Q> {
+    pub fn par_iter<'q>(&'q mut self, batch_size: usize) -> ParIter<'q, 'w, 's, S, F> {
         self.borrow();
         ParIter {
             borrow: self,
@@ -195,38 +208,50 @@ impl<'w, Q: HecsQuery> QueryBorrowChecked<'w, Q> {
         }
 
         for index in self.archetype_access.immutable.ones() {
-            Q::Fetch::borrow(&self.archetypes[index], &Default::default());
+            F::borrow(&self.archetypes[index], self.state);
         }
 
         for index in self.archetype_access.mutable.ones() {
-            Q::Fetch::borrow(&self.archetypes[index], &Default::default());
+            F::borrow(&self.archetypes[index], self.state);
         }
 
         self.borrowed = true;
     }
 }
 
-unsafe impl<'w, Q: HecsQuery> Send for QueryBorrowChecked<'w, Q> {}
-unsafe impl<'w, Q: HecsQuery> Sync for QueryBorrowChecked<'w, Q> {}
+unsafe impl<'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Send
+    for QueryBorrowChecked<'w, 's, S, F>
+{
+}
+unsafe impl<'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Sync
+    for QueryBorrowChecked<'w, 's, S, F>
+{
+}
 
-impl<'w, Q: HecsQuery> Drop for QueryBorrowChecked<'w, Q> {
+impl<'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Drop
+    for QueryBorrowChecked<'w, 's, S, F>
+{
     #[inline]
     fn drop(&mut self) {
         if self.borrowed {
             for index in self.archetype_access.immutable.ones() {
-                Q::Fetch::release(&self.archetypes[index], &Default::default());
+                F::release(&self.archetypes[index], self.state);
             }
 
             for index in self.archetype_access.mutable.ones() {
-                Q::Fetch::release(&self.archetypes[index], &Default::default());
+                F::release(&self.archetypes[index], self.state);
             }
         }
     }
 }
 
-impl<'q, 'w, Q: HecsQuery> IntoIterator for &'q mut QueryBorrowChecked<'w, Q> {
-    type IntoIter = QueryIter<'q, 'w, Q>;
-    type Item = <Q::Fetch as Fetch<'q>>::Item;
+impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> IntoIterator
+    for &'q mut QueryBorrowChecked<'w, 's, S, F>
+{
+    type IntoIter = QueryIter<'q, 'w, 's, S, F>;
+    // FIXME: do I specify the concrete 'w? I tried to kind of avoid that a little with the `for<'a>
+    // Fetch<'a>` trait bound.
+    type Item = <F as Fetch<'q>>::Item;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -235,17 +260,25 @@ impl<'q, 'w, Q: HecsQuery> IntoIterator for &'q mut QueryBorrowChecked<'w, Q> {
 }
 
 /// Iterator over the set of entities with the components in `Q`
-pub struct QueryIter<'q, 'w, Q: HecsQuery> {
-    borrow: &'q mut QueryBorrowChecked<'w, Q>,
+pub struct QueryIter<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> {
+    borrow: &'q mut QueryBorrowChecked<'w, 's, S, F>,
     archetype_index: usize,
-    iter: Option<ChunkIter<Q>>,
+    iter: Option<ChunkIter<'s, S, F>>,
 }
 
-unsafe impl<'q, 'w, Q: HecsQuery> Send for QueryIter<'q, 'w, Q> {}
-unsafe impl<'q, 'w, Q: HecsQuery> Sync for QueryIter<'q, 'w, Q> {}
+unsafe impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Send
+    for QueryIter<'q, 'w, 's, S, F>
+{
+}
+unsafe impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Sync
+    for QueryIter<'q, 'w, 's, S, F>
+{
+}
 
-impl<'q, 'w, Q: HecsQuery> Iterator for QueryIter<'q, 'w, Q> {
-    type Item = <Q::Fetch as Fetch<'q>>::Item;
+impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Iterator
+    for QueryIter<'q, 'w, 's, S, F>
+{
+    type Item = <F as Fetch<'q>>::Item;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -255,11 +288,10 @@ impl<'q, 'w, Q: HecsQuery> Iterator for QueryIter<'q, 'w, Q> {
                     let archetype = self.borrow.archetypes.get(self.archetype_index as usize)?;
                     self.archetype_index += 1;
                     unsafe {
-                        self.iter = Q::Fetch::get(archetype, 0, &Default::default()).map(|fetch| {
-                            ChunkIter {
-                                fetch,
-                                len: archetype.len(),
-                            }
+                        self.iter = F::get(archetype, 0, self.borrow.state).map(|fetch| ChunkIter {
+                            fetch,
+                            len: archetype.len(),
+                            state: self.borrow.state,
                         });
                     }
                 }
@@ -282,54 +314,59 @@ impl<'q, 'w, Q: HecsQuery> Iterator for QueryIter<'q, 'w, Q> {
     }
 }
 
-impl<'q, 'w, Q: HecsQuery> ExactSizeIterator for QueryIter<'q, 'w, Q> {
+impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> ExactSizeIterator
+    for QueryIter<'q, 'w, 's, S, F>
+{
     fn len(&self) -> usize {
         self.borrow
             .archetypes
             .iter()
-            .filter(|&x| Q::Fetch::access(x, &Default::default()).is_some())
+            .filter(|&x| F::access(x, self.borrow.state).is_some())
             .map(|x| x.len())
             .sum()
     }
 }
 
-struct ChunkIter<Q: HecsQuery> {
-    fetch: Q::Fetch,
+struct ChunkIter<'s, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> {
+    fetch: F,
     len: usize,
+    state: &'s S,
 }
 
-impl<Q: HecsQuery> ChunkIter<Q> {
+impl<'s, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> ChunkIter<'s, S, F> {
     #[inline]
-    unsafe fn next<'a>(&mut self) -> Option<<Q::Fetch as Fetch<'a>>::Item> {
+    unsafe fn next<'a>(&mut self) -> Option<<F as Fetch<'a>>::Item> {
         loop {
             if self.len == 0 {
                 return None;
             }
 
             self.len -= 1;
-            if self.fetch.should_skip(&Default::default()) {
+            if self.fetch.should_skip(self.state) {
                 // we still need to progress the iterator
-                let _ = self.fetch.next(&Default::default());
+                let _ = self.fetch.next(self.state);
                 continue;
             }
 
-            break Some(self.fetch.next(&Default::default()));
+            break Some(self.fetch.next(self.state));
         }
     }
 }
 
 /// Batched version of `QueryIter`
-pub struct ParIter<'q, 'w, Q: HecsQuery> {
-    borrow: &'q mut QueryBorrowChecked<'w, Q>,
+pub struct ParIter<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> {
+    borrow: &'q mut QueryBorrowChecked<'w, 's, S, F>,
     archetype_index: usize,
     batch_size: usize,
     batch: usize,
 }
 
-impl<'q, 'w, Q: HecsQuery> ParallelIterator<Batch<'q, Q>> for ParIter<'q, 'w, Q> {
-    type Item = <Q::Fetch as Fetch<'q>>::Item;
+impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>>
+    ParallelIterator<Batch<'q, 's, S, F>> for ParIter<'q, 'w, 's, S, F>
+{
+    type Item = <F as Fetch<'q>>::Item;
 
-    fn next_batch(&mut self) -> Option<Batch<'q, Q>> {
+    fn next_batch(&mut self) -> Option<Batch<'q, 's, S, F>> {
         loop {
             let archetype = self.borrow.archetypes.get(self.archetype_index)?;
             let offset = self.batch_size * self.batch;
@@ -338,15 +375,14 @@ impl<'q, 'w, Q: HecsQuery> ParallelIterator<Batch<'q, Q>> for ParIter<'q, 'w, Q>
                 self.batch = 0;
                 continue;
             }
-            if let Some(fetch) =
-                unsafe { Q::Fetch::get(archetype, offset as usize, &Default::default()) }
-            {
+            if let Some(fetch) = unsafe { F::get(archetype, offset as usize, self.borrow.state) } {
                 self.batch += 1;
                 return Some(Batch {
                     _marker: PhantomData,
                     state: ChunkIter {
                         fetch,
                         len: self.batch_size.min(archetype.len() - offset),
+                        state: self.borrow.state,
                     },
                 });
             } else {
@@ -362,13 +398,15 @@ impl<'q, 'w, Q: HecsQuery> ParallelIterator<Batch<'q, Q>> for ParIter<'q, 'w, Q>
 }
 
 /// A sequence of entities yielded by `ParIter`
-pub struct Batch<'q, Q: HecsQuery> {
+pub struct Batch<'q, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> {
     _marker: PhantomData<&'q ()>,
-    state: ChunkIter<Q>,
+    state: ChunkIter<'s, S, F>,
 }
 
-impl<'q, 'w, Q: HecsQuery> Iterator for Batch<'q, Q> {
-    type Item = <Q::Fetch as Fetch<'q>>::Item;
+impl<'q, 'w, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Iterator
+    for Batch<'q, 's, S, F>
+{
+    type Item = <F as Fetch<'q>>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         let components = unsafe { self.state.next()? };
@@ -376,7 +414,10 @@ impl<'q, 'w, Q: HecsQuery> Iterator for Batch<'q, Q> {
     }
 }
 
-unsafe impl<'q, Q: HecsQuery> Send for Batch<'q, Q> {}
+unsafe impl<'q, 's, S: Default + Sync + Send, F: for<'a> Fetch<'a, State = S>> Send
+    for Batch<'q, 's, S, F>
+{
+}
 
 /// A borrow of a `World` sufficient to execute the query `Q` on a single entity
 pub struct QueryOneChecked<'a, Q: HecsQuery> {
