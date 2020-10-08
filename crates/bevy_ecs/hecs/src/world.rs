@@ -15,8 +15,11 @@
 // modified by Bevy contributors
 
 use crate::{
-    alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, query_one::ReadOnlyQueryOne,
-    EntityReserver, Mut, RefMut,
+    alloc::vec::Vec,
+    borrow::EntityRef,
+    query::{DynamicComponentQuery, ReadOnlyFetch, RuntimeQuery},
+    query_one::ReadOnlyQueryOne,
+    EntityReserver, Fetch, Mut, RefMut,
 };
 use bevy_utils::{HashMap, HashSet};
 use core::{
@@ -258,12 +261,21 @@ impl World {
     /// assert!(entities.contains(&(a, 123, true)));
     /// assert!(entities.contains(&(b, 456, false)));
     /// ```
-    pub fn query<Q: Query>(&self) -> QueryBorrow<'_, Q>
+    pub fn query<Q: Query>(&self) -> QueryBorrow<'_, (), Q>
     where
-        Q::Fetch: ReadOnlyFetch,
+        Q::Fetch: ReadOnlyFetch + for<'a> Fetch<'a, State = ()>,
     {
         // SAFE: read-only access to world and read only query prevents mutable access
         unsafe { self.query_unchecked() }
+    }
+
+    // TODO: Not sure if this is safe or not
+    /// Make a query that can be constructed at runtime
+    pub unsafe fn runtime_query(
+        &self,
+        query: DynamicComponentQuery,
+    ) -> QueryBorrow<'_, DynamicComponentQuery, RuntimeQuery> {
+        self.runtime_query_unchecked(query)
     }
 
     /// Efficiently iterate over all entities that have certain components
@@ -294,7 +306,10 @@ impl World {
     /// assert!(entities.contains(&(a, 123, true)));
     /// assert!(entities.contains(&(b, 456, false)));
     /// ```
-    pub fn query_mut<Q: Query>(&mut self) -> QueryBorrow<'_, Q> {
+    pub fn query_mut<Q: Query>(&mut self) -> QueryBorrow<'_, (), Q>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    {
         // SAFE: unique mutable access
         unsafe { self.query_unchecked() }
     }
@@ -331,8 +346,22 @@ impl World {
     /// assert!(entities.contains(&(a, 123, true)));
     /// assert!(entities.contains(&(b, 456, false)));
     /// ```
-    pub unsafe fn query_unchecked<Q: Query>(&self) -> QueryBorrow<'_, Q> {
-        QueryBorrow::new(&self.archetypes)
+    pub unsafe fn query_unchecked<Q: Query>(&self) -> QueryBorrow<'_, (), Q>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    {
+        QueryBorrow::new(&self.archetypes, ())
+    }
+
+    /// Unchecked query with additional status
+    pub unsafe fn runtime_query_unchecked<S: Default, Q: Query>(
+        &self,
+        state: S,
+    ) -> QueryBorrow<'_, S, Q>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = S>,
+    {
+        QueryBorrow::new(&self.archetypes, state)
     }
 
     /// Prepare a read only query against a single entity
