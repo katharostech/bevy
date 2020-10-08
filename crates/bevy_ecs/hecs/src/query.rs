@@ -17,10 +17,10 @@
 use core::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    ptr::NonNull,
+    ptr::{slice_from_raw_parts_mut, NonNull},
 };
 
-use crate::{archetype::Archetype, Component, Entity, MissingComponent};
+use crate::{archetype::Archetype, Component, ComponentId, Entity, MissingComponent};
 
 /// A collection of component types to fetch from a `World`
 pub trait Query {
@@ -65,7 +65,8 @@ pub trait Fetch<'a>: Sized {
     /// - Must only be called after `borrow`
     /// - `release` must not be called while `'a` is still live
     /// - Bounds-checking must be performed externally
-    /// - Any resulting borrows must be legal (e.g. no &mut to something another iterator might access)
+    /// - Any resulting borrows must be legal (e.g. no &mut to something another iterator might
+    ///   access)
     unsafe fn next(&mut self, state: &Self::State) -> Self::Item;
 }
 
@@ -78,6 +79,150 @@ pub enum Access {
     Read,
     /// Read and write components
     Write,
+}
+
+/// The information needed to access a dynamic component, one that's info is determined at runtime
+/// instead of compile time
+#[derive(Debug, Copy, Clone)]
+pub struct DynamicComponentInfo {
+    id: ComponentId,
+    size: usize,
+}
+
+/// The requested access to a dynamic component
+#[derive(Debug, Copy, Clone)]
+pub struct DynamicComponentAccess {
+    info: DynamicComponentInfo,
+    access: Access,
+}
+
+/// A dynamically constructable component query
+#[derive(Debug, Clone)]
+pub struct DynamicComponentQuery([Option<DynamicComponentAccess>; 64]);
+
+impl Default for DynamicComponentQuery {
+    fn default() -> Self {
+        DynamicComponentQuery([None; 64])
+    }
+}
+
+impl std::ops::Deref for DynamicComponentQuery {
+    type Target = [Option<DynamicComponentAccess>; 64];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for DynamicComponentQuery {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// A [`Fetch`] implementation for dynamic components
+#[derive(Debug)]
+pub struct DynamicFetch {
+    datas: [Option<NonNull<[u8]>>; 64],
+}
+
+impl Default for DynamicFetch {
+    fn default() -> Self {
+        DynamicFetch { datas: [None; 64] }
+    }
+}
+
+impl<'a> Fetch<'a> for DynamicFetch {
+    type Item = [Option<&'a [u8]>; 64];
+    type State = DynamicComponentQuery;
+
+    fn access(archetype: &Archetype, state: &Self::State) -> Option<Access> {
+        let mut access = None;
+
+        for component_access in state.iter().filter_map(|x| x.as_ref()) {
+            if archetype.has_component(component_access.info.id) {
+                access = access.map_or(Some(component_access.access), |access| {
+                    if access < component_access.access {
+                        Some(component_access.access)
+                    } else {
+                        Some(access)
+                    }
+                });
+            }
+        }
+
+        access
+    }
+
+    fn borrow(archetype: &Archetype, state: &Self::State) {
+        for component_access in state.iter().filter_map(|&x| x) {
+            archetype.borrow_component(component_access.info.id);
+        }
+    }
+
+    fn release(archetype: &Archetype, state: &Self::State) {
+        for component_access in state.iter().filter_map(|&x| x) {
+            archetype.release_component(component_access.info.id);
+        }
+    }
+
+    unsafe fn get(archetype: &'a Archetype, offset: usize, state: &Self::State) -> Option<Self> {
+        let mut fetch = Self { datas: [None; 64] };
+
+        let mut matches_any = false;
+        for (component_index, component_access) in state
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &x)| x.map(|y| (i, y)))
+        {
+            let ptr =
+                archetype.get_dynamic(component_access.info.id, component_access.info.size, offset);
+
+            if ptr.is_some() {
+                matches_any = true
+            }
+
+            fetch.datas[component_index] = ptr.map(|x| {
+                NonNull::new_unchecked(slice_from_raw_parts_mut(
+                    x.as_ptr(),
+                    component_access.info.size,
+                ))
+            });
+        }
+
+        if matches_any {
+            Some(fetch)
+        } else {
+            None
+        }
+    }
+
+    unsafe fn next(&mut self, state: &Self::State) -> Self::Item {
+        let mut components = [None; 64];
+
+        for (component_index, component_access) in state
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &x)| x.map(|y| (i, y)))
+        {
+            if let Some(nonnull) = &mut self.datas[component_index] {
+                components[component_index] = {
+                    let x = nonnull.as_ptr();
+                    *nonnull = NonNull::new_unchecked(slice_from_raw_parts_mut(
+                        (x as *mut u8).add(component_access.info.size),
+                        component_access.info.size,
+                    ));
+                    Some(&*x)
+                };
+            }
+        }
+
+        components
+    }
+
+    unsafe fn should_skip(&self, _state: &Self::State) -> bool {
+        false
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
