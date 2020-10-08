@@ -55,7 +55,7 @@ pub trait Fetch<'a>: Sized {
     ///
     /// # Safety
     /// shouldn't be called if there is no current item
-    unsafe fn should_skip(&self, state: &Self::State) -> bool {
+    unsafe fn should_skip(&self, _state: &Self::State) -> bool {
         false
     }
 
@@ -874,9 +874,11 @@ impl<'q, 'w, Q: Query> Iterator for QueryIter<'q, 'w, Q> {
                     let archetype = self.borrow.archetypes.get(self.archetype_index)?;
                     self.archetype_index += 1;
                     unsafe {
-                        self.iter = Q::Fetch::get(archetype, 0, &Default::default()).map(|fetch| ChunkIter {
-                            fetch,
-                            len: archetype.len(),
+                        self.iter = Q::Fetch::get(archetype, 0, &Default::default()).map(|fetch| {
+                            ChunkIter {
+                                fetch,
+                                len: archetype.len(),
+                            }
                         });
                     }
                 }

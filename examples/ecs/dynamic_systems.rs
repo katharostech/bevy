@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use std::{
     any::{Any, TypeId},
     time::Duration,
