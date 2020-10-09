@@ -69,10 +69,12 @@ where
         QueryBorrowChecked::new(&self.world.archetypes, self.archetype_access, self.state)
     }
 
-    // TODO: find a way to make `iter`, `get`, `get_mut`, and `entity` safe without using tracking pointers with global locks
+    // TODO: find a way to make `iter`, `get`, `get_mut`, and `entity` safe without using tracking
+    // pointers with global locks
 
-    /// Gets a reference to the entity's component of the given type. This will fail if the entity does not have
-    /// the given component type or if the given component type does not match this query.
+    /// Gets a reference to the entity's component of the given type. This will fail if the entity
+    /// does not have the given component type or if the given component type does not match this
+    /// query.
     pub fn get<T: Component>(&self, entity: Entity) -> Result<Ref<T>, QueryError> {
         if let Some(location) = self.world.get_entity_location(entity) {
             if self
@@ -84,7 +86,8 @@ where
                     .mutable
                     .contains(location.archetype as usize)
             {
-                // SAFE: we have already checked that the entity/component matches our archetype access. and systems are scheduled to run with safe archetype access
+                // SAFE: we have already checked that the entity/component matches our archetype
+                // access. and systems are scheduled to run with safe archetype access
                 unsafe {
                     self.world
                         .get_ref_at_location_unchecked(location)
@@ -109,7 +112,8 @@ where
                     .mutable
                     .contains(location.archetype as usize)
             {
-                // SAFE: we have already checked that the entity matches our archetype. and systems are scheduled to run with safe archetype access
+                // SAFE: we have already checked that the entity matches our archetype. and systems
+                // are scheduled to run with safe archetype access
                 Ok(unsafe {
                     QueryOneChecked::new(
                         &self.world.archetypes[location.archetype as usize],
@@ -125,8 +129,9 @@ where
         }
     }
 
-    /// Gets a mutable reference to the entity's component of the given type. This will fail if the entity does not have
-    /// the given component type or if the given component type does not match this query.
+    /// Gets a mutable reference to the entity's component of the given type. This will fail if the
+    /// entity does not have the given component type or if the given component type does not match
+    /// this query.
     pub fn get_mut<T: Component>(&self, entity: Entity) -> Result<RefMut<'_, T>, QueryError> {
         let location = match self.world.get_entity_location(entity) {
             None => return Err(QueryError::ComponentError(ComponentError::NoSuchEntity)),
@@ -153,8 +158,9 @@ where
         self.world.removed::<C>()
     }
 
-    /// Sets the entity's component to the given value. This will fail if the entity does not already have
-    /// the given component type or if the given component type does not match this query.
+    /// Sets the entity's component to the given value. This will fail if the entity does not
+    /// already have the given component type or if the given component type does not match this
+    /// query.
     pub fn set<T: Component>(&mut self, entity: Entity, component: T) -> Result<(), QueryError> {
         let mut current = self.get_mut::<T>(entity)?;
         *current = component;

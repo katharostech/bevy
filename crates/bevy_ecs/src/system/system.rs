@@ -1,5 +1,5 @@
-use crate::resource::Resources;
-use bevy_hecs::{Access, ComponentId, Query, World};
+use crate::{resource::Resources, GenericQuery};
+use bevy_hecs::{Access, ComponentId, DynamicComponentQuery, Fetch, Query, World};
 use bevy_utils::HashSet;
 use fixedbitset::FixedBitSet;
 use std::borrow::Cow;
@@ -57,6 +57,16 @@ impl ArchetypeAccess {
     pub fn set_access_for_query<Q>(&mut self, world: &World)
     where
         Q: Query,
+        Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    {
+        self.set_access_for_stateful_query::<(), Q>(world, &());
+    }
+
+    pub fn set_access_for_stateful_query<S, Q>(&mut self, world: &World, state: &S)
+    where
+        S: Default,
+        Q: Query,
+        Q::Fetch: for<'a> Fetch<'a, State = S>,
     {
         let iterator = world.archetypes();
         let bits = iterator.len();
@@ -64,7 +74,11 @@ impl ArchetypeAccess {
         self.mutable.grow(bits);
         iterator
             .enumerate()
-            .filter_map(|(index, archetype)| archetype.access::<Q>().map(|access| (index, access)))
+            .filter_map(|(index, archetype)| {
+                archetype
+                    .access::<S, Q>(state)
+                    .map(|access| (index, access))
+            })
             .for_each(|(archetype, access)| match access {
                 Access::Read => self.immutable.set(archetype, true),
                 Access::Write => self.mutable.set(archetype, true),
@@ -101,6 +115,86 @@ impl TypeAccess {
         self.immutable.clear();
         self.mutable.clear();
     }
+}
+
+pub type DynamicSystemWorkload =
+    fn(&mut GenericQuery<DynamicComponentQuery, DynamicComponentQuery>);
+
+pub struct DynamicSystem {
+    name: String,
+    system_id: SystemId,
+    workload: DynamicSystemWorkload,
+    archetype_access: ArchetypeAccess,
+    resource_access: TypeAccess,
+    component_query: DynamicComponentQuery,
+}
+
+impl DynamicSystem {
+    pub fn new(
+        name: String,
+        component_query: DynamicComponentQuery,
+        workload: DynamicSystemWorkload,
+    ) -> Self {
+        DynamicSystem {
+            name,
+            workload,
+            component_query,
+            resource_access: Default::default(),
+            archetype_access: Default::default(),
+            system_id: SystemId::new(),
+        }
+    }
+
+    // TODO: Impl `Default` for `DynamicSystem`
+}
+
+impl System for DynamicSystem {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        self.name.clone().into()
+    }
+
+    fn id(&self) -> SystemId {
+        self.system_id
+    }
+
+    fn update_archetype_access(&mut self, world: &World) {
+        // Clear previous archetype access list
+        self.archetype_access.clear();
+
+        self.archetype_access
+            .set_access_for_stateful_query::<_, DynamicComponentQuery>(
+                &world,
+                &self.component_query,
+            );
+    }
+
+    fn archetype_access(&self) -> &ArchetypeAccess {
+        &self.archetype_access
+    }
+
+    // TODO: Allow specifying resource access
+    fn resource_access(&self) -> &TypeAccess {
+        &self.resource_access
+    }
+
+    // TODO: Allow specifying the thread local execution
+    fn thread_local_execution(&self) -> ThreadLocalExecution {
+        ThreadLocalExecution::NextFlush
+    }
+
+    fn run(&mut self, world: &World, _resources: &Resources) {
+        (self.workload)(&mut GenericQuery::new_stateful(
+            world,
+            &self.archetype_access,
+            &self.component_query,
+        ));
+    }
+
+    // TODO: Allow specifying a thread local system
+    fn run_thread_local(&mut self, _world: &mut World, _resources: &mut Resources) {}
+
+    // TODO: Allow specifying an initialization function
+    fn initialize(&mut self, _world: &mut World, _resources: &mut Resources) {}
 }
 
 #[cfg(test)]

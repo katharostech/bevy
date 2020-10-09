@@ -88,6 +88,7 @@ rand = "0.7.3"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 ron = "0.6"
+bytemuck = "1.4.1"
 
 #wasm
 console_error_panic_hook = "0.1.6"

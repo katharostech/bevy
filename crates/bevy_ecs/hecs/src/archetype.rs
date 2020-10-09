@@ -241,7 +241,8 @@ impl Archetype {
         size: usize,
         index: usize,
     ) -> Option<NonNull<u8>> {
-        debug_assert!(index < self.len);
+        // TODO(zicklag): I'm pretty sure that it is valid for the index to be zero
+        debug_assert!(index < self.len || index == 0);
         Some(NonNull::new_unchecked(
             (*self.data.get())
                 .as_ptr()
@@ -438,8 +439,11 @@ impl Archetype {
     }
 
     /// How, if at all, `Q` will access entities in this archetype
-    pub fn access<Q: Query>(&self) -> Option<Access> {
-        Q::Fetch::access(self, &Default::default())
+    pub fn access<S: Default, Q: Query>(&self, state: &S) -> Option<Access>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = S>,
+    {
+        Q::Fetch::access(self, state)
     }
 }
 

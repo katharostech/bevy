@@ -85,29 +85,35 @@ pub enum Access {
 /// instead of compile time
 #[derive(Debug, Copy, Clone)]
 pub struct DynamicComponentInfo {
-    id: ComponentId,
-    size: usize,
+    /// The unique identifier for the component
+    pub id: ComponentId,
+    /// The size of the component in bytes  
+    pub size: usize,
 }
 
 /// The requested access to a dynamic component
 #[derive(Debug, Copy, Clone)]
 pub struct DynamicComponentAccess {
-    info: DynamicComponentInfo,
-    access: Access,
+    /// The information related to the component type
+    pub info: DynamicComponentInfo,
+    /// the access required for that component
+    pub access: Access,
 }
+
+const COMPONENT_QUERY_SIZE: usize = 16;
 
 /// A dynamically constructable component query
 #[derive(Debug, Clone)]
-pub struct DynamicComponentQuery([Option<DynamicComponentAccess>; 64]);
+pub struct DynamicComponentQuery([Option<DynamicComponentAccess>; COMPONENT_QUERY_SIZE]);
 
 impl Default for DynamicComponentQuery {
     fn default() -> Self {
-        DynamicComponentQuery([None; 64])
+        DynamicComponentQuery([None; COMPONENT_QUERY_SIZE])
     }
 }
 
 impl std::ops::Deref for DynamicComponentQuery {
-    type Target = [Option<DynamicComponentAccess>; 64];
+    type Target = [Option<DynamicComponentAccess>; COMPONENT_QUERY_SIZE];
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -120,20 +126,26 @@ impl std::ops::DerefMut for DynamicComponentQuery {
     }
 }
 
+impl Query for DynamicComponentQuery {
+    type Fetch = DynamicFetch;
+}
+
 /// A [`Fetch`] implementation for dynamic components
 #[derive(Debug)]
 pub struct DynamicFetch {
-    datas: [Option<NonNull<[u8]>>; 64],
+    datas: [Option<NonNull<[u8]>>; COMPONENT_QUERY_SIZE],
 }
 
 impl Default for DynamicFetch {
     fn default() -> Self {
-        DynamicFetch { datas: [None; 64] }
+        DynamicFetch {
+            datas: [None; COMPONENT_QUERY_SIZE],
+        }
     }
 }
 
 impl<'a> Fetch<'a> for DynamicFetch {
-    type Item = [Option<&'a [u8]>; 64];
+    type Item = [Option<&'a mut [u8]>; COMPONENT_QUERY_SIZE];
     type State = DynamicComponentQuery;
 
     fn access(archetype: &Archetype, state: &Self::State) -> Option<Access> {
@@ -167,7 +179,9 @@ impl<'a> Fetch<'a> for DynamicFetch {
     }
 
     unsafe fn get(archetype: &'a Archetype, offset: usize, state: &Self::State) -> Option<Self> {
-        let mut fetch = Self { datas: [None; 64] };
+        let mut fetch = Self {
+            datas: [None; COMPONENT_QUERY_SIZE],
+        };
 
         let mut matches_any = false;
         for (component_index, component_access) in state
@@ -175,8 +189,12 @@ impl<'a> Fetch<'a> for DynamicFetch {
             .enumerate()
             .filter_map(|(i, &x)| x.map(|y| (i, y)))
         {
-            let ptr =
-                archetype.get_dynamic(component_access.info.id, component_access.info.size, offset);
+            let ptr = archetype.get_dynamic(
+                component_access.info.id,
+                component_access.info.size,
+                // FIXME: Is this right for the index?
+                0,
+            );
 
             if ptr.is_some() {
                 matches_any = true
@@ -184,7 +202,7 @@ impl<'a> Fetch<'a> for DynamicFetch {
 
             fetch.datas[component_index] = ptr.map(|x| {
                 NonNull::new_unchecked(slice_from_raw_parts_mut(
-                    x.as_ptr(),
+                    x.as_ptr().add(offset),
                     component_access.info.size,
                 ))
             });
@@ -198,7 +216,8 @@ impl<'a> Fetch<'a> for DynamicFetch {
     }
 
     unsafe fn next(&mut self, state: &Self::State) -> Self::Item {
-        let mut components = [None; 64];
+        const INIT: Option<&mut [u8]> = None;
+        let mut components = [INIT; COMPONENT_QUERY_SIZE];
 
         for (component_index, component_access) in state
             .iter()
@@ -212,7 +231,7 @@ impl<'a> Fetch<'a> for DynamicFetch {
                         (x as *mut u8).add(component_access.info.size),
                         component_access.info.size,
                     ));
-                    Some(&*x)
+                    Some(&mut *x)
                 };
             }
         }
