@@ -1,13 +1,12 @@
 use super::{FetchResource, ResourceQuery};
 use crate::system::SystemId;
-use bevy_hecs::{Archetype, Entity, Ref, RefMut, TypeInfo};
+use bevy_hecs::{Archetype, Entity, Ref, RefMut, TypeInfo, AtomicBorrow};
 use bevy_utils::HashMap;
 use core::any::TypeId;
 use downcast_rs::{impl_downcast, Downcast};
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
-    ptr::NonNull,
     thread::ThreadId,
 };
 
@@ -208,7 +207,7 @@ impl Resources {
         use std::cmp::Ordering;
         match index.cmp(&archetype.len()) {
             Ordering::Equal => {
-                unsafe { archetype.allocate(Entity::new(index as u32)) };
+                archetype.allocate(Entity::new(index as u32));
             }
             Ordering::Greater => panic!("attempted to access index beyond 'current_capacity + 1'"),
             Ordering::Less => (),
@@ -327,21 +326,21 @@ impl Resources {
     //         .unwrap_or_else(|| panic!("Resource does not exist {}", std::any::type_name::<T>()))
     // }
 
-    #[inline]
-    fn get_resource_data_index<T: Resource>(
-        &self,
-        resource_index: ResourceIndex,
-    ) -> Option<(&ResourceData, usize)> {
-        self.resource_data.get(&TypeId::of::<T>()).and_then(|data| {
-            let index = match resource_index {
-                ResourceIndex::Global => data.default_index?,
-                ResourceIndex::System(id) => {
-                    data.system_id_to_archetype_index.get(&id.0).cloned()?
-                }
-            };
-            Some((data, index as usize))
-        })
-    }
+    // #[inline]
+    // fn get_resource_data_index<T: Resource>(
+    //     &self,
+    //     resource_index: ResourceIndex,
+    // ) -> Option<(&ResourceData, usize)> {
+    //     self.resource_data.get(&TypeId::of::<T>()).and_then(|data| {
+    //         let index = match resource_index {
+    //             ResourceIndex::Global => data.default_index?,
+    //             ResourceIndex::System(id) => {
+    //                 data.system_id_to_archetype_index.get(&id.0).cloned()?
+    //             }
+    //         };
+    //         Some((data, index as usize))
+    //     })
+    // }
 
     // pub fn borrow<T: Resource>(&self) {
     //     if let Some(data) = self.resource_data.get(&TypeId::of::<T>()) {

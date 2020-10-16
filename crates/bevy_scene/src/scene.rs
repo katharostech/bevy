@@ -28,7 +28,7 @@ impl Scene {
                         components: Vec::new(),
                     })
                 }
-                for type_info in archetype.types() {
+                for type_info in &archetype.type_info {
                     if let Some(component_registration) = component_registry.get(&type_info.id()) {
                         let properties =
                             component_registration.get_component_properties(&archetype, index);

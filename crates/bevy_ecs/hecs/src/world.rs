@@ -18,8 +18,8 @@ use crate::{
     alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, query_one::ReadOnlyQueryOne,
     soa::SpawnBatch, EntityReserver, Mut, RefMut, TypeInfo,
 };
-use bevy_utils::{HashMap, HashSet};
-use core::{any::TypeId, fmt, mem, ptr};
+use bevy_utils::{HashMap};
+use core::{any::TypeId, fmt};
 
 #[cfg(feature = "std")]
 use std::{collections::hash_map::Entry, error::Error};

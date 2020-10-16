@@ -74,7 +74,7 @@ mod world;
 
 pub use soa::SoaBatch;
 pub use archetype::{Archetype, ComponentStorageMeta, ComponentStorage};
-pub use borrow::{Ref, RefMut};
+pub use borrow::{Ref, RefMut, AtomicBorrow};
 pub use bundle::{Bundle, DynamicBundle, MissingComponent};
 pub use entities::{Entity, EntityReserver, Location, NoSuchEntity};
 // pub use entity_builder::{BuiltEntity, EntityBuilder};

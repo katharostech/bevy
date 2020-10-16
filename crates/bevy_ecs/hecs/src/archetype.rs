@@ -95,13 +95,24 @@ pub trait ComponentStorage {
 ///
 /// Accessing `Archetype`s is only required for complex dynamic scheduling. To manipulate entities,
 /// go through the `World`.
-#[derive(Debug)]
 pub struct Archetype {
     pub type_info: Vec<TypeInfo>,
     pub entities: Vec<Entity>,
     component_storages: Vec<Box<dyn ComponentStorage>>,
     pub type_indices: HashMap<TypeId, usize>,
     grow_size: usize,
+}
+
+impl std::fmt::Debug for Archetype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Archetype")
+            .field("type_info", &self.type_info)
+            .field("entitites", &self.entities)
+            .field("type_indices", &self.type_indices)
+            .field("grow_size", &self.grow_size)
+            .field("component_storages", &"Vec<Box<dyn ComponentStorage>>")
+            .finish()
+    }
 }
 
 impl Archetype {
@@ -323,6 +334,7 @@ impl Archetype {
 }
 
 #[allow(missing_docs)]
+#[derive(Debug)]
 pub struct ComponentStorageMeta {
     pub borrow: AtomicBorrow,
     pub mutated_entities: Vec<bool>,
