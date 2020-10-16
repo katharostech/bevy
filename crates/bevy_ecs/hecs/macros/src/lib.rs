@@ -66,7 +66,7 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
                 Self::static_type_info()
             }
 
-            fn put(mut self, archetype: &mut Archetype) {
+            fn put(mut self, archetype: &mut #path::Archetype) {
                 #(
                     archetype.insert(self.#fields);
                 )*
@@ -107,10 +107,10 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
             }
 
             unsafe fn get(
-                archetype: &Archetype,
+                archetype: &#path::Archetype,
                 index: usize,
             ) -> Result<Self, #path::MissingComponent> {
-                Ok(Self { #( #fields: archetype.get_value::<#tys>(index).ok_or_else(MissingComponent::new::<#tys>)?, )* })
+                Ok(Self { #( #fields: archetype.get_value::<#tys>(index).ok_or_else(#path::MissingComponent::new::<#tys>)?, )* })
             }
         }
     };

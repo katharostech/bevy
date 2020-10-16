@@ -4,12 +4,19 @@ use std::{any::TypeId, fmt::Debug};
 
 use crate::{borrow::AtomicBorrow, query::Fetch, Access, Component, Query};
 
-struct VecComponentStorage<T> {
+/// Vector-based component storage backend
+///
+/// This is the default component storage backend used internally.
+// TODO: Should this not be public?
+pub struct VecComponentStorage<T> {
+    /// The backing vector storage
     storage: Vec<T>,
+    /// The storage metadata
     meta: ComponentStorageMeta,
 }
 
 impl<T> Default for VecComponentStorage<T> {
+    /// Initialize empty storage
     fn default() -> Self {
         Self {
             storage: Vec::default(),
@@ -42,17 +49,17 @@ where
         unsafe { self.storage.get_unchecked(index) as *const T as *const u8 }
     }
 
-    fn insert(&mut self, value: *const u8) {
+    fn push(&mut self, value: *const u8) {
         unsafe {
             self.storage.push(value.cast::<T>().read());
         }
     }
 
-    fn reserve(&mut self, size: usize) {
-        self.storage.reserve(size);
+    fn reserve(&mut self, count: usize) {
+        self.storage.reserve(count);
     }
 
-    unsafe fn swap_remove(&mut self, index: usize, forget: bool) {
+    fn swap_remove(&mut self, index: usize, forget: bool) {
         let value = self.storage.swap_remove(index);
         if forget {
             std::mem::forget(value);
@@ -76,18 +83,42 @@ where
     }
 }
 
+/// Trait that allows a type to be used as a component storage backend
+///
+/// The current implementation used internally is [`VecComponentStorage`].
 pub trait ComponentStorage {
+    /// Return the component storages associated metadata
     fn meta(&self) -> &ComponentStorageMeta;
+    /// Return a mutable reference to the component storage metadata
     fn meta_mut(&mut self) -> &mut ComponentStorageMeta;
+    /// Get the [`TypeId`] that the storage is configured to store
     fn get_type(&self) -> TypeId;
+    /// Get a pointer to the backing storage
     fn get_pointer(&self) -> *const u8;
+    /// Get a pointer to the value at the given index
     fn get_value(&self, index: usize) -> *const u8;
-    fn reserve(&mut self, size: usize);
-    fn insert(&mut self, value: *const u8);
+    /// Request that enough space to fit `count` more elements be allocated in the backing storage
+    ///
+    /// The backing storage may decide to reserve more space than requested to avoid reallocations
+    /// and it may not do anything if the backing storage already has enough room for the given
+    /// number of extra items.
+    fn reserve(&mut self, count: usize);
+    /// Given a pointer to the value, add it to the end of the backing storage
+    // TODO: Do we not want to make it required to add the item to the *end* of the storage? For now
+    // that seems like a requirement.
+    fn push(&mut self, value: *const u8);
+    /// Get number of items in the storage
     fn len(&self) -> usize;
+    /// Get the number of items that the storage has room for without re-allocating
     fn capacity(&self) -> usize;
-    unsafe fn swap_remove(&mut self, index: usize, forget: bool);
+    /// Remove the item at index and replace it with the last item in the storage
+    ///
+    /// If `forget` is true, the item will be forgotten and it's destructor will not be run.
+    fn swap_remove(&mut self, index: usize, forget: bool);
+    /// Clear the storage of all items, memory will not be de-allocated so it is available for
+    /// future use
     fn clear(&mut self);
+    /// Return the size of each item in the storage
     fn item_size(&self) -> usize;
 }
 
@@ -95,12 +126,22 @@ pub trait ComponentStorage {
 ///
 /// Accessing `Archetype`s is only required for complex dynamic scheduling. To manipulate entities,
 /// go through the `World`.
+///
+/// [`type_info`], [`entities`], and [`component_storages`] ( private ) are all kept in sync such
+/// that an index into one of them will correspond to the same index in the others.
 pub struct Archetype {
+    /// Vector containing information about each of the component types that is stored in this
+    /// archetype
     pub type_info: Vec<TypeInfo>,
+    /// Vector of entities  stored in this archetype
     pub entities: Vec<Entity>,
-    component_storages: Vec<Box<dyn ComponentStorage>>,
+    /// The mapping of the [`TypeId`] to the index in the [`type_info`], [`entities`], and
+    /// [`component_storages`] ( private ) vectors
     pub type_indices: HashMap<TypeId, usize>,
+    /// The number of entities to allocate room for every time we exceed our current capacity
     grow_size: usize,
+    /// The component storages associated to each entity in [`entities`]
+    component_storages: Vec<Box<dyn ComponentStorage>>,
 }
 
 impl std::fmt::Debug for Archetype {
@@ -258,9 +299,7 @@ impl Archetype {
             panic!("entity index in archetype is out of bounds");
         }
         for storage in self.component_storages.iter_mut() {
-            unsafe {
-                storage.swap_remove(index, false);
-            }
+            storage.swap_remove(index, false);
             let storage_meta = storage.meta_mut();
             storage_meta.added_entities.swap_remove(index);
             storage_meta.mutated_entities.swap_remove(index);
@@ -292,7 +331,7 @@ impl Archetype {
         for storage in self.component_storages.iter_mut() {
             if let Some(target_storage) = archetype.get_storage_dynamic_mut(storage.get_type()) {
                 let value = storage.get_value(old_index);
-                target_storage.insert(value);
+                target_storage.push(value);
                 // forget the removed component because we copied it to the other archetype storage
                 storage.swap_remove(old_index, true);
             } else {
@@ -323,7 +362,7 @@ impl Archetype {
 
     #[inline]
     fn insert_dynamic(&mut self, type_id: TypeId, value: *const u8) {
-        self.get_storage_dynamic_mut(type_id).unwrap().insert(value);
+        self.get_storage_dynamic_mut(type_id).unwrap().push(value);
     }
 
     /// How, if at all, `Q` will access entities in this archetype

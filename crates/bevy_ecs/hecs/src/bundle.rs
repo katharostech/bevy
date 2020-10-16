@@ -57,7 +57,9 @@ pub trait Bundle: DynamicBundle {
     /// `f` must produce pointers to the expected fields. The implementation must not read from any
     /// pointers if any call to `f` returns `None`.
     #[doc(hidden)]
-    unsafe fn get(archetype: &Archetype, index: usize) -> Result<Self, MissingComponent> where Self: Sized;
+    unsafe fn get(archetype: &Archetype, index: usize) -> Result<Self, MissingComponent>
+    where
+        Self: Sized;
 }
 
 /// Error indicating that an entity did not have a required component

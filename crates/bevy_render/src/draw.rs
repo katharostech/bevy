@@ -160,57 +160,60 @@ impl<'a> FetchResource<'a> for FetchDrawContext {
     type Item = DrawContext<'a>;
 
     fn borrow(resources: &Resources) {
-        resources.borrow_mut::<Assets<PipelineDescriptor>>();
-        resources.borrow_mut::<Assets<Shader>>();
-        resources.borrow_mut::<PipelineCompiler>();
-        resources.borrow::<Box<dyn RenderResourceContext>>();
-        resources.borrow::<VertexBufferDescriptors>();
-        resources.borrow::<SharedBuffers>();
+        todo!();
+        // resources.borrow_mut::<Assets<PipelineDescriptor>>();
+        // resources.borrow_mut::<Assets<Shader>>();
+        // resources.borrow_mut::<PipelineCompiler>();
+        // resources.borrow::<Box<dyn RenderResourceContext>>();
+        // resources.borrow::<VertexBufferDescriptors>();
+        // resources.borrow::<SharedBuffers>();
     }
 
     fn release(resources: &Resources) {
-        resources.release_mut::<Assets<PipelineDescriptor>>();
-        resources.release_mut::<Assets<Shader>>();
-        resources.release_mut::<PipelineCompiler>();
-        resources.release::<Box<dyn RenderResourceContext>>();
-        resources.release::<VertexBufferDescriptors>();
-        resources.release::<SharedBuffers>();
+        todo!();
+        // resources.release_mut::<Assets<PipelineDescriptor>>();
+        // resources.release_mut::<Assets<Shader>>();
+        // resources.release_mut::<PipelineCompiler>();
+        // resources.release::<Box<dyn RenderResourceContext>>();
+        // resources.release::<VertexBufferDescriptors>();
+        // resources.release::<SharedBuffers>();
     }
 
     unsafe fn get(resources: &'a Resources, _system_id: Option<SystemId>) -> Self::Item {
-        let pipelines = {
-            let (value, type_state) = resources
-                .get_unsafe_ref_with_type_state::<Assets<PipelineDescriptor>>(
-                    ResourceIndex::Global,
-                );
-            ResMut::new(value, type_state.mutated())
-        };
-        let shaders = {
-            let (value, type_state) =
-                resources.get_unsafe_ref_with_type_state::<Assets<Shader>>(ResourceIndex::Global);
-            ResMut::new(value, type_state.mutated())
-        };
-        let pipeline_compiler = {
-            let (value, type_state) =
-                resources.get_unsafe_ref_with_type_state::<PipelineCompiler>(ResourceIndex::Global);
-            ResMut::new(value, type_state.mutated())
-        };
+        todo!();
+        // let pipelines = {
+        //     let (value, type_state) = resources
+        //         .get_unsafe_ref_with_type_state::<Assets<PipelineDescriptor>>(
+        //             ResourceIndex::Global,
+        //         );
+        //     ResMut::new(value, type_state.mutated())
+        // };
+        // let shaders = {
+        //     let (value, type_state) =
+        //         resources.get_unsafe_ref_with_type_state::<Assets<Shader>>(ResourceIndex::Global);
+        //     ResMut::new(value, type_state.mutated())
+        // };
+        // let pipeline_compiler = {
+        //     let (value, type_state) =
+        //         resources.get_unsafe_ref_with_type_state::<PipelineCompiler>(ResourceIndex::Global);
+        //     ResMut::new(value, type_state.mutated())
+        // };
 
-        DrawContext {
-            pipelines,
-            shaders,
-            pipeline_compiler,
-            render_resource_context: Res::new(
-                resources.get_unsafe_ref::<Box<dyn RenderResourceContext>>(ResourceIndex::Global),
-            ),
-            vertex_buffer_descriptors: Res::new(
-                resources.get_unsafe_ref::<VertexBufferDescriptors>(ResourceIndex::Global),
-            ),
-            shared_buffers: Res::new(
-                resources.get_unsafe_ref::<SharedBuffers>(ResourceIndex::Global),
-            ),
-            current_pipeline: None,
-        }
+        // DrawContext {
+        //     pipelines,
+        //     shaders,
+        //     pipeline_compiler,
+        //     render_resource_context: Res::new(
+        //         resources.get_unsafe_ref::<Box<dyn RenderResourceContext>>(ResourceIndex::Global),
+        //     ),
+        //     vertex_buffer_descriptors: Res::new(
+        //         resources.get_unsafe_ref::<VertexBufferDescriptors>(ResourceIndex::Global),
+        //     ),
+        //     shared_buffers: Res::new(
+        //         resources.get_unsafe_ref::<SharedBuffers>(ResourceIndex::Global),
+        //     ),
+        //     current_pipeline: None,
+        // }
     }
 
     fn access() -> TypeAccess {
