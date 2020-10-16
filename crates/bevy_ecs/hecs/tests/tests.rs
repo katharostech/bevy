@@ -397,3 +397,27 @@ fn added_tracking() {
         .get()
         .is_none());
 }
+
+#[test]
+fn soa() {
+    let mut world = World::new();
+
+    world.spawn_batch_new(SoaBatch::new((
+        vec!["hi".to_string(), "world".to_string()],
+        vec![111u32, 222u32],
+        vec![111u128, 222u128],
+        vec![111u16, 222u16],
+    )));
+
+    for components in & mut world.query::<(&String, &u32, &u128, &u16)>() {
+        // make sure that the retruned entity has one of the sets of components we spawned above
+        match &components {
+            (string, &111u32, &111u128, &111u16) if string.as_str() == "hi" => (),
+            (string, 111u32, 111u128, 111u16)  if string.as_str() == "world" => (),
+            _ => {
+                dbg!(components);
+                panic!("Entity's component does not match what it was spawned with");
+            }
+        }
+    }
+}
