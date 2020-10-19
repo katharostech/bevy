@@ -118,38 +118,58 @@ impl TypeAccess {
     }
 }
 
-pub type DynamicSystemWorkload =
-    fn(&mut GenericQuery<DynamicComponentQuery, DynamicComponentQuery>);
-
-pub struct DynamicSystem {
-    name: String,
+pub struct DynamicSystem<S> {
+    pub name: String,
+    pub state: S,
     system_id: SystemId,
-    workload: DynamicSystemWorkload,
     archetype_access: ArchetypeAccess,
     resource_access: TypeAccess,
-    component_query: DynamicComponentQuery,
+    settings: DynamicSystemSettings<S>,
 }
 
-impl DynamicSystem {
-    pub fn new(
-        name: String,
-        component_query: DynamicComponentQuery,
-        workload: DynamicSystemWorkload,
-    ) -> Self {
+#[derive(Clone)]
+pub struct DynamicSystemSettings<S> {
+    pub workload:
+        fn(&mut S, &Resources, &mut [GenericQuery<DynamicComponentQuery, DynamicComponentQuery>]),
+    pub queries: Vec<DynamicComponentQuery>,
+    pub thread_local_execution: ThreadLocalExecution,
+    pub thread_local_system: fn(&mut S, &mut World, &mut Resources),
+    pub init_function: fn(&mut S, &mut World, &mut Resources),
+    pub resource_access: TypeAccess,
+}
+
+impl<S> Default for DynamicSystemSettings<S> {
+    fn default() -> Self {
+        Self {
+            workload: |_, _, _| (),
+            queries: Default::default(),
+            thread_local_execution: ThreadLocalExecution::NextFlush,
+            thread_local_system: |_, _, _| (),
+            init_function: |_, _, _| (),
+            resource_access: Default::default(),
+        }
+    }
+}
+
+impl<S> DynamicSystem<S> {
+    pub fn new(name: String, state: S) -> Self {
         DynamicSystem {
             name,
-            workload,
-            component_query,
+            state,
+            system_id: SystemId::new(),
             resource_access: Default::default(),
             archetype_access: Default::default(),
-            system_id: SystemId::new(),
+            settings: Default::default(),
         }
     }
 
-    // TODO: Impl `Default` for `DynamicSystem`
+    pub fn settings(mut self, settings: DynamicSystemSettings<S>) -> Self {
+        self.settings = settings;
+        self
+    }
 }
 
-impl System for DynamicSystem {
+impl<S: Send + Sync> System for DynamicSystem<S> {
     fn name(&self) -> std::borrow::Cow<'static, str> {
         self.name.clone().into()
     }
@@ -162,40 +182,43 @@ impl System for DynamicSystem {
         // Clear previous archetype access list
         self.archetype_access.clear();
 
-        self.archetype_access
-            .set_access_for_stateful_query::<_, DynamicComponentQuery>(
-                &world,
-                &self.component_query,
-            );
+        for query in &self.settings.queries {
+            self.archetype_access
+                .set_access_for_stateful_query::<_, DynamicComponentQuery>(&world, &query);
+        }
     }
 
     fn archetype_access(&self) -> &ArchetypeAccess {
         &self.archetype_access
     }
 
-    // TODO: Allow specifying resource access
     fn resource_access(&self) -> &TypeAccess {
         &self.resource_access
     }
 
-    // TODO: Allow specifying the thread local execution
     fn thread_local_execution(&self) -> ThreadLocalExecution {
-        ThreadLocalExecution::NextFlush
+        self.settings.thread_local_execution
     }
 
-    fn run(&mut self, world: &World, _resources: &Resources) {
-        (self.workload)(&mut GenericQuery::new_stateful(
-            world,
-            &self.archetype_access,
-            &self.component_query,
-        ));
+    fn run(&mut self, world: &World, resources: &Resources) {
+        let archetype_access = &self.archetype_access;
+        let mut queries: Vec<_> = self
+            .settings
+            .queries
+            .iter()
+            .map(|query| GenericQuery::new_stateful(world, &archetype_access, query))
+            .collect();
+
+        (self.settings.workload)(&mut self.state, resources, queries.as_mut_slice());
     }
 
-    // TODO: Allow specifying a thread local system
-    fn run_thread_local(&mut self, _world: &mut World, _resources: &mut Resources) {}
+    fn run_thread_local(&mut self, world: &mut World, resources: &mut Resources) {
+        (self.settings.thread_local_system)(&mut self.state, world, resources);
+    }
 
-    // TODO: Allow specifying an initialization function
-    fn initialize(&mut self, _world: &mut World, _resources: &mut Resources) {}
+    fn initialize(&mut self, world: &mut World, resources: &mut Resources) {
+        (self.settings.init_function)(&mut self.state, world, resources);
+    }
 }
 
 #[cfg(test)]

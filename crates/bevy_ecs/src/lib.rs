@@ -13,7 +13,7 @@ pub mod prelude {
     pub use crate::{
         resource::{ChangedRes, FromResources, Local, OrRes, Res, ResMut, Resource, Resources},
         system::{
-            Commands, DynamicSystem, DynamicSystemWorkload, IntoForEachSystem, IntoQuerySystem,
+            Commands, DynamicSystem, DynamicSystemSettings, IntoForEachSystem, IntoQuerySystem,
             IntoThreadLocalSystem, Query, System,
         },
         world::WorldBuilderSource,
