@@ -10,9 +10,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_app::ScheduleRunnerPlugin;
-use bevy_ecs::{
-    Access, ComponentId, DynamicComponentAccess, DynamicComponentInfo, DynamicComponentQuery,
-};
+use bevy_ecs::{ComponentId, DynamicComponentInfo, DynamicComponentQuery};
 
 // Define our componens
 
@@ -39,7 +37,7 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
             },
             Vel {
                 x: 0.0,
-                y: 1.0,
+                y: -1.0,
             }
         ),
         (
@@ -49,9 +47,19 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
             },
             Vel {
                 x: 0.0,
-                y: -1.0,
+                y: 1.0,
             }
-        )
+        ),
+        (
+            Pos {
+                x: 1.0,
+                y: 1.0
+            },
+            Vel {
+                x: -0.5,
+                y: 0.5,
+            }
+        ),
     ]);
 }
 
@@ -71,22 +79,14 @@ fn main() {
     // storage of any data as an array of bytes.
     let mut query = DynamicComponentQuery::default();
 
-    // Set the first element of the query to be write access to our `Pos` component
-    query[0] = Some(DynamicComponentAccess {
-        info: DynamicComponentInfo {
-            id: ComponentId::RustTypeId(std::any::TypeId::of::<Pos>()),
-            size: std::mem::size_of::<Pos>(),
-        },
-        access: Access::Write,
+    query.immutable[0] = Some(DynamicComponentInfo {
+        id: ComponentId::RustTypeId(std::any::TypeId::of::<Vel>()),
+        size: std::mem::size_of::<Vel>(),
     });
 
-    // Set the second element of the query to be read access to our `Vel` component
-    query[1] = Some(DynamicComponentAccess {
-        info: DynamicComponentInfo {
-            id: ComponentId::RustTypeId(std::any::TypeId::of::<Vel>()),
-            size: std::mem::size_of::<Vel>(),
-        },
-        access: Access::Read,
+    query.mutable[0] = Some(DynamicComponentInfo {
+        id: ComponentId::RustTypeId(std::any::TypeId::of::<Pos>()),
+        size: std::mem::size_of::<Pos>(),
     });
 
     // Create our dynamic system by specifying the name, the query we created above, and a closure
@@ -103,17 +103,22 @@ fn main() {
 
             // Here we take the mutable reference to the bytes of our position and velocity
             // components
-            let pos_bytes = components[0].take().unwrap();
-            let vel_bytes = components[1].take().unwrap();
+            let pos_bytes = components.mutable[0].take().unwrap();
+            let vel_bytes = components.immutable[0].take().unwrap();
 
-            unsafe fn from_slice<T>(s: &mut [u8]) -> &mut T {
+            unsafe fn from_slice_mut<T>(s: &mut [u8]) -> &mut T {
                 debug_assert_eq!(std::mem::size_of::<T>(), s.len());
                 &mut *(s.as_mut_ptr() as *mut T)
             }
 
+            unsafe fn from_slice<T>(s: &[u8]) -> &T {
+                debug_assert_eq!(std::mem::size_of::<T>(), s.len());
+                &*(s.as_ptr() as *mut T)
+            }
+
             // Instead of interacting with the raw bytes of our components, we first cast them to
             // their Rust structs
-            let mut pos: &mut Pos = unsafe { from_slice(pos_bytes) };
+            let mut pos: &mut Pos = unsafe { from_slice_mut(pos_bytes) };
             let vel: &Vel = unsafe { from_slice(vel_bytes) };
 
             // Now we can operate on our components

@@ -17,7 +17,7 @@
 use core::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    ptr::{slice_from_raw_parts_mut, NonNull},
+    ptr::{slice_from_raw_parts, slice_from_raw_parts_mut, NonNull},
 };
 
 use crate::{archetype::Archetype, Component, ComponentId, Entity, MissingComponent};
@@ -91,121 +91,115 @@ pub struct DynamicComponentInfo {
     pub size: usize,
 }
 
-/// The requested access to a dynamic component
-#[derive(Debug, Copy, Clone)]
-pub struct DynamicComponentAccess {
-    /// The information related to the component type
-    pub info: DynamicComponentInfo,
-    /// the access required for that component
-    pub access: Access,
-}
-
 const COMPONENT_QUERY_SIZE: usize = 16;
 
 /// A dynamically constructable component query
-#[derive(Debug, Clone)]
-pub struct DynamicComponentQuery([Option<DynamicComponentAccess>; COMPONENT_QUERY_SIZE]);
-
-impl Default for DynamicComponentQuery {
-    fn default() -> Self {
-        DynamicComponentQuery([None; COMPONENT_QUERY_SIZE])
-    }
-}
-
-impl std::ops::Deref for DynamicComponentQuery {
-    type Target = [Option<DynamicComponentAccess>; COMPONENT_QUERY_SIZE];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for DynamicComponentQuery {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
+#[derive(Debug, Default, Clone)]
+pub struct DynamicComponentQuery {
+    /// The list of immutable components to query for
+    pub immutable: [Option<DynamicComponentInfo>; COMPONENT_QUERY_SIZE],
+    /// This list of mutable components to query for
+    pub mutable: [Option<DynamicComponentInfo>; COMPONENT_QUERY_SIZE],
 }
 
 impl Query for DynamicComponentQuery {
     type Fetch = DynamicFetch;
 }
 
-/// A [`Fetch`] implementation for dynamic components
-#[derive(Debug)]
-pub struct DynamicFetch {
-    datas: [Option<NonNull<[u8]>>; COMPONENT_QUERY_SIZE],
+/// The result of a dynamic component query, containing references to the component's bytes
+#[derive(Default, Debug)]
+pub struct DynamicQueryResult<'a> {
+    /// the list of immutable components returned
+    pub immutable: [Option<&'a [u8]>; COMPONENT_QUERY_SIZE],
+    /// the list of mutable components returned
+    pub mutable: [Option<&'a mut [u8]>; COMPONENT_QUERY_SIZE],
 }
 
-impl Default for DynamicFetch {
-    fn default() -> Self {
-        DynamicFetch {
-            datas: [None; COMPONENT_QUERY_SIZE],
-        }
-    }
+/// A [`Fetch`] implementation for dynamic components
+#[derive(Debug, Default, Clone)]
+pub struct DynamicFetch {
+    immutable: [Option<NonNull<u8>>; COMPONENT_QUERY_SIZE],
+    mutable: [Option<NonNull<u8>>; COMPONENT_QUERY_SIZE],
 }
 
 impl<'a> Fetch<'a> for DynamicFetch {
-    type Item = [Option<&'a mut [u8]>; COMPONENT_QUERY_SIZE];
+    type Item = DynamicQueryResult<'a>;
     type State = DynamicComponentQuery;
 
-    fn access(archetype: &Archetype, state: &Self::State) -> Option<Access> {
+    fn access(archetype: &Archetype, query: &Self::State) -> Option<Access> {
         let mut access = None;
 
-        for component_access in state.iter().filter_map(|x| x.as_ref()) {
-            if archetype.has_component(component_access.info.id) {
-                access = access.map_or(Some(component_access.access), |access| {
-                    if access < component_access.access {
-                        Some(component_access.access)
-                    } else {
-                        Some(access)
-                    }
-                });
+        for component in query.immutable.iter().filter_map(|&x| x) {
+            if archetype.has_component(component.id) {
+                access = Some(Access::Read);
+            }
+        }
+
+        for component in query.mutable.iter().filter_map(|&x| x) {
+            if archetype.has_component(component.id) {
+                access = Some(Access::Write);
             }
         }
 
         access
     }
 
-    fn borrow(archetype: &Archetype, state: &Self::State) {
-        for component_access in state.iter().filter_map(|&x| x) {
-            archetype.borrow_component(component_access.info.id);
+    fn borrow(archetype: &Archetype, query: &Self::State) {
+        for component in query.immutable.iter().filter_map(|&x| x) {
+            archetype.borrow_component(component.id);
+        }
+
+        for component in query.mutable.iter().filter_map(|&x| x) {
+            archetype.borrow_component(component.id);
         }
     }
 
-    fn release(archetype: &Archetype, state: &Self::State) {
-        for component_access in state.iter().filter_map(|&x| x) {
-            archetype.release_component(component_access.info.id);
+    fn release(archetype: &Archetype, query: &Self::State) {
+        for component in query.immutable.iter().filter_map(|&x| x) {
+            archetype.release_component(component.id);
+        }
+
+        for component in query.mutable.iter().filter_map(|&x| x) {
+            archetype.release_component(component.id);
         }
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize, state: &Self::State) -> Option<Self> {
-        let mut fetch = Self {
-            datas: [None; COMPONENT_QUERY_SIZE],
-        };
+    unsafe fn get(archetype: &'a Archetype, offset: usize, query: &Self::State) -> Option<Self> {
+        let mut fetch = Self::default();
 
         let mut matches_any = false;
-        for (component_index, component_access) in state
+        for (component_index, component) in query
+            .immutable
             .iter()
             .enumerate()
             .filter_map(|(i, &x)| x.map(|y| (i, y)))
         {
-            let ptr = archetype.get_dynamic(
-                component_access.info.id,
-                component_access.info.size,
-                // FIXME: Is this right for the index?
-                0,
-            );
+            // FIXME: is 0 right for the index?
+            let ptr = archetype.get_dynamic(component.id, component.size, 0 /* index */);
 
             if ptr.is_some() {
-                matches_any = true
+                matches_any = true;
             }
 
-            fetch.datas[component_index] = ptr.map(|x| {
-                NonNull::new_unchecked(slice_from_raw_parts_mut(
-                    x.as_ptr().add(offset),
-                    component_access.info.size,
-                ))
-            });
+            fetch.immutable[component_index] =
+                ptr.map(|x| NonNull::new_unchecked(x.as_ptr().add(offset)));
+        }
+
+        for (component_index, component) in query
+            .mutable
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &x)| x.map(|y| (i, y)))
+        {
+            // FIXME: is 0 right for the index?
+            let ptr = archetype.get_dynamic(component.id, component.size, 0 /* index */);
+
+            if ptr.is_some() {
+                matches_any = true;
+            }
+
+            fetch.mutable[component_index] =
+                ptr.map(|x| NonNull::new_unchecked(x.as_ptr().add(offset)));
         }
 
         if matches_any {
@@ -215,28 +209,42 @@ impl<'a> Fetch<'a> for DynamicFetch {
         }
     }
 
-    unsafe fn next(&mut self, state: &Self::State) -> Self::Item {
-        const INIT: Option<&mut [u8]> = None;
-        let mut components = [INIT; COMPONENT_QUERY_SIZE];
+    unsafe fn next(&mut self, query: &Self::State) -> Self::Item {
+        let mut query_result = DynamicQueryResult::default();
 
-        for (component_index, component_access) in state
+        for (component_index, component) in query
+            .immutable
             .iter()
             .enumerate()
             .filter_map(|(i, &x)| x.map(|y| (i, y)))
         {
-            if let Some(nonnull) = &mut self.datas[component_index] {
-                components[component_index] = {
-                    let x = nonnull.as_ptr();
-                    *nonnull = NonNull::new_unchecked(slice_from_raw_parts_mut(
-                        (x as *mut u8).add(component_access.info.size),
-                        component_access.info.size,
-                    ));
-                    Some(&mut *x)
-                };
-            }
+            let ptr = self.immutable[component_index].expect("Expected pointer to component data");
+
+            // Increment the pointer for the next iteration
+            self.immutable[component_index] =
+                Some(NonNull::new_unchecked(ptr.as_ptr().add(component.size)));
+
+            query_result.immutable[component_index] =
+                Some(&*slice_from_raw_parts(ptr.as_ptr(), component.size));
         }
 
-        components
+        for (component_index, component) in query
+            .mutable
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &x)| x.map(|y| (i, y)))
+        {
+            let ptr = self.mutable[component_index].expect("Expected pointer to component data");
+
+            // Increment the pointer for the next iteration
+            self.mutable[component_index] =
+                Some(NonNull::new_unchecked(ptr.as_ptr().add(component.size)));
+
+            query_result.mutable[component_index] =
+                Some(&mut *slice_from_raw_parts_mut(ptr.as_ptr(), component.size));
+        }
+
+        query_result
     }
 
     unsafe fn should_skip(&self, _state: &Self::State) -> bool {
