@@ -211,6 +211,10 @@ name = "dynamic_systems"
 path = "examples/ecs/dynamic_systems.rs"
 
 [[example]]
+name = "dynamic_components"
+path = "examples/ecs/dynamic_components.rs"
+
+[[example]]
 name = "breakout"
 path = "examples/game/breakout.rs"
 

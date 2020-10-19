@@ -509,9 +509,12 @@ impl TypeState {
 /// Metadata required to store a component
 #[derive(Debug, Copy, Clone)]
 pub struct TypeInfo {
-    id: ComponentId,
-    layout: Layout,
-    drop: unsafe fn(*mut u8),
+    /// The ID unique to the component type
+    pub id: ComponentId,
+    /// The memory layout of the component
+    pub layout: Layout,
+    /// The drop function for the component
+    pub drop: unsafe fn(*mut u8),
 }
 
 impl TypeInfo {
