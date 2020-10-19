@@ -1,6 +1,6 @@
 use crate::{serde::SceneSerializer, Scene};
 use anyhow::Result;
-use bevy_ecs::{EntityMap, Resources, World, ComponentId};
+use bevy_ecs::{ComponentId, EntityMap, Resources, World};
 use bevy_property::{DynamicProperties, PropertyTypeRegistry};
 use bevy_type_registry::{ComponentRegistry, TypeRegistry, TypeUuid};
 use serde::Serialize;

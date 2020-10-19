@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_app::ScheduleRunnerPlugin;
-use bevy_ecs::{ComponentId, DynamicComponentInfo, DynamicComponentQuery};
+use bevy_ecs::{ComponentId, DynamicComponentInfo, DynamicComponentQuery, DynamicSystemSettings};
 
 // Define our componens
 
@@ -91,41 +91,48 @@ fn main() {
 
     // Create our dynamic system by specifying the name, the query we created above, and a closure
     // that operates on the query
-    let pos_vel_system = DynamicSystem::new("pos_vel_system".into(), query, |query| {
-        // Iterate over the query just like you would in a typical query
-        for mut components in &mut query.iter() {
-            // `components` will be an array with indexes corresponding to the indexes of our
-            // DynamicComponentAccess information that we constructed for our query when creating
-            // the system.
-            //
-            // Each item in the array is an optional mutable reference to a byte slice representing
-            // the component data: Option<&mut [u8]>.
+    let pos_vel_system =
+        DynamicSystem::new("pos_vel_system".into(), () /* system local state */).settings(
+            DynamicSystemSettings {
+                queries: vec![query],
+                workload: |_state, _resources, queries| {
+                    // Iterate over the query just like you would in a typical query
+                    for mut components in &mut queries[0].iter() {
+                        // `components` will be an array with indexes corresponding to the indexes of our
+                        // DynamicComponentAccess information that we constructed for our query when creating
+                        // the system.
+                        //
+                        // Each item in the array is an optional mutable reference to a byte slice representing
+                        // the component data: Option<&mut [u8]>.
 
-            // Here we take the mutable reference to the bytes of our position and velocity
-            // components
-            let pos_bytes = components.mutable[0].take().unwrap();
-            let vel_bytes = components.immutable[0].take().unwrap();
+                        // Here we take the mutable reference to the bytes of our position and velocity
+                        // components
+                        let pos_bytes = components.mutable[0].take().unwrap();
+                        let vel_bytes = components.immutable[0].take().unwrap();
 
-            unsafe fn from_slice_mut<T>(s: &mut [u8]) -> &mut T {
-                debug_assert_eq!(std::mem::size_of::<T>(), s.len());
-                &mut *(s.as_mut_ptr() as *mut T)
-            }
+                        unsafe fn from_slice_mut<T>(s: &mut [u8]) -> &mut T {
+                            debug_assert_eq!(std::mem::size_of::<T>(), s.len());
+                            &mut *(s.as_mut_ptr() as *mut T)
+                        }
 
-            unsafe fn from_slice<T>(s: &[u8]) -> &T {
-                debug_assert_eq!(std::mem::size_of::<T>(), s.len());
-                &*(s.as_ptr() as *mut T)
-            }
+                        unsafe fn from_slice<T>(s: &[u8]) -> &T {
+                            debug_assert_eq!(std::mem::size_of::<T>(), s.len());
+                            &*(s.as_ptr() as *mut T)
+                        }
 
-            // Instead of interacting with the raw bytes of our components, we first cast them to
-            // their Rust structs
-            let mut pos: &mut Pos = unsafe { from_slice_mut(pos_bytes) };
-            let vel: &Vel = unsafe { from_slice(vel_bytes) };
+                        // Instead of interacting with the raw bytes of our components, we first cast them to
+                        // their Rust structs
+                        let mut pos: &mut Pos = unsafe { from_slice_mut(pos_bytes) };
+                        let vel: &Vel = unsafe { from_slice(vel_bytes) };
 
-            // Now we can operate on our components
-            pos.x += vel.x;
-            pos.y += vel.y;
-        }
-    });
+                        // Now we can operate on our components
+                        pos.x += vel.x;
+                        pos.y += vel.y;
+                    }
+                },
+                ..Default::default()
+            },
+        );
 
     App::build()
         .add_plugin(ScheduleRunnerPlugin::run_loop(Duration::from_secs(1)))
