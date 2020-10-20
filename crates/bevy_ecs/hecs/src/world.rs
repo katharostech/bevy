@@ -932,13 +932,9 @@ impl Hash for ComponentId {
         match self {
             ComponentId::RustTypeId(id) => {
                 id.hash(state);
-                // Write a byte to distinguish the variants
-                state.write_u8(0);
             }
             ComponentId::ExternalId(id) => {
                 state.write_u64(*id);
-                // Write a byte to distinguish the variants
-                state.write_u8(1);
             }
         }
     }
