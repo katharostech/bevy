@@ -25,11 +25,8 @@ use crate::{
 };
 
 use bevy_utils::HashSet;
-use core::{
-    any::TypeId,
-    mem::{self, MaybeUninit},
-    ptr,
-};
+use core::{intrinsics::copy_nonoverlapping, mem::MaybeUninit, ptr};
+use ptr::slice_from_raw_parts;
 
 use crate::{archetype::TypeInfo, Component, DynamicBundle};
 
@@ -68,24 +65,40 @@ impl EntityBuilder {
 
     /// Add `component` to the entity
     pub fn add<T: Component>(&mut self, component: T) -> &mut Self {
-        if !self.id_set.insert(TypeId::of::<T>().into()) {
+        self.add_dynamic(TypeInfo::of::<T>(), unsafe {
+            &*slice_from_raw_parts(
+                &component as *const T as *const u8,
+                std::mem::size_of::<T>(),
+            )
+        });
+        std::mem::forget(component);
+        self
+    }
+
+    /// Add a dynamic component to the entity
+    ///
+    /// You must provide the type info and a slice containing the component data
+    pub fn add_dynamic(&mut self, type_info: TypeInfo, data: &[u8]) -> &mut Self {
+        debug_assert_eq!(type_info.layout().size(), data.len());
+
+        if !self.id_set.insert(type_info.id) {
             return self;
         }
-        let end = self.cursor + mem::size_of::<T>();
+        let end = self.cursor + type_info.layout.size();
         if end > self.storage.len() {
             self.grow(end);
         }
-        if mem::size_of::<T>() != 0 {
+        if type_info.layout.size() != 0 {
             unsafe {
-                self.storage
-                    .as_mut_ptr()
-                    .add(self.cursor)
-                    .cast::<T>()
-                    .write_unaligned(component);
+                copy_nonoverlapping(
+                    data.as_ptr(),
+                    self.storage.as_mut_ptr().add(self.cursor) as *mut u8,
+                    data.len(),
+                );
             }
         }
-        self.info.push((TypeInfo::of::<T>(), self.cursor));
-        self.cursor += mem::size_of::<T>();
+        self.info.push((type_info, self.cursor));
+        self.cursor += type_info.layout().size();
         self
     }
 
