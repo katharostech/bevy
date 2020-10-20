@@ -11,7 +11,7 @@ use std::{alloc::Layout, time::Duration};
 use bevy::prelude::*;
 use bevy_app::ScheduleRunnerPlugin;
 use bevy_ecs::{
-    ComponentId, DynamicComponentInfo, DynamicComponentQuery, DynamicSystemSettings, RuntimeBundle,
+    ComponentId, DynamicComponentInfo, DynamicComponentQuery, DynamicSystemSettings, EntityBuilder,
     TypeInfo,
 };
 
@@ -24,11 +24,12 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
     // representing a Position and one representing a Velocity. Each of these will be made up of two
     // bytes for simplicity, one representing the x and y position/velocity.
 
-    // We create our first component bundle
-    let components1 = RuntimeBundle {
-        // we must define our components' type information
-        components: vec![
-            // First we define our "Position" component
+    // We create our first entity
+    let mut builder = EntityBuilder::new();
+    // Then we add our "Position component"
+    let entity1 = builder
+        .add_dynamic(
+            // We need to describe our component's information
             TypeInfo {
                 // We must provide a unique id for the compoonent
                 id: ComponentId::ExternalId(0),
@@ -37,53 +38,62 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
                 // And we must specify a drop function for our component
                 drop: |_| (),
             },
-            // Next we define our "Velocity" component
-            TypeInfo {
-                // We must specify a different ID for the velocity component
-                id: ComponentId::ExternalId(1),
-                // We specify the layout which happens to be the same as "Position"
-                layout: Layout::from_size_align(2, 1).unwrap(),
-                // And the drop function
-                drop: |_| (),
-            },
-        ],
-
-        // Data must be a Vector of Vectors of bytes and must contain the raw byte data for
-        // each of the components we want to add
-        data: vec![
-            // This will be the raw byte data for our position component
+            // And provide the raw byte data data for the component
             vec![
                 0, // X position byte
                 0, // Y position byte
-            ],
-            // This will be the raw byte data for our velocity component
-            vec![
-                1, // X velocity byte
-                0, // Y velocity byte
-            ],
-        ],
-    };
-
-    // Now we create another bundle for our next entity
-    let components2 = RuntimeBundle {
-        components: vec![
+            ]
+            // And cast the data to a pointer
+            .as_slice(),
+        )
+        // Next we add our "Velocity component"
+        .add_dynamic(
             TypeInfo {
-                id: ComponentId::ExternalId(0),
+                // This component needs its own unique ID
+                id: ComponentId::ExternalId(1),
                 layout: Layout::from_size_align(2 /* size */, 1 /* alignment */).unwrap(),
                 drop: |_| (),
             },
+            vec![
+                0, // X position byte
+                1, // Y position byte
+            ]
+            .as_slice(),
+        )
+        .build();
+
+    // And let's create another entity
+    let mut builder = EntityBuilder::new();
+    let entity2 = builder
+        .add_dynamic(
+            TypeInfo {
+                id: ComponentId::ExternalId(0),
+                layout: Layout::from_size_align(2, 1).unwrap(),
+                drop: |_| (),
+            },
+            vec![
+                0, // X position byte
+                0, // Y position byte
+            ]
+            .as_slice(),
+        )
+        .add_dynamic(
             TypeInfo {
                 id: ComponentId::ExternalId(1),
                 layout: Layout::from_size_align(2, 1).unwrap(),
                 drop: |_| (),
             },
-        ],
-        data: vec![vec![0, 0], vec![0, 2]],
-    };
+            vec![
+                2, // X position byte
+                0, // Y position byte
+            ]
+            .as_slice(),
+        )
+        .build();
 
     // Now we can spawn our entities
-    world.spawn(components1);
-    world.spawn(components2);
+    world.spawn(entity1);
+    world.spawn(entity2);
 }
 
 fn main() {

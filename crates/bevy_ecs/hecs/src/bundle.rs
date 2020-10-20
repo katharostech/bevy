@@ -42,36 +42,6 @@ pub trait DynamicBundle {
     unsafe fn put(self, f: impl FnMut(*mut u8, ComponentId, usize) -> bool);
 }
 
-/// A bundle that can be created dynamically at runtime
-#[derive(Debug)]
-pub struct RuntimeBundle {
-    /// The information for each component in this bundle
-    pub components: Vec<TypeInfo>,
-    /// The raw data for all of the components in the bundle
-    pub data: Vec<Vec<u8>>,
-}
-
-impl DynamicBundle for RuntimeBundle {
-    fn with_ids<T>(&self, f: impl FnOnce(&[ComponentId]) -> T) -> T {
-        let ids: Vec<_> = self.components.iter().map(|x| x.id()).collect();
-        f(ids.as_slice())
-    }
-
-    fn type_info(&self) -> Vec<TypeInfo> {
-        self.components.clone()
-    }
-
-    unsafe fn put(self, mut f: impl FnMut(*mut u8, ComponentId, usize) -> bool) {
-        for (mut data, info) in self.data.into_iter().zip(self.components.into_iter()) {
-            debug_assert_eq!(data.len(), info.layout().size());
-
-            if f(data.as_mut_ptr(), info.id(), info.layout().size()) {
-                std::mem::forget(data);
-            }
-        }
-    }
-}
-
 /// A statically typed collection of components
 pub trait Bundle: DynamicBundle {
     #[doc(hidden)]
