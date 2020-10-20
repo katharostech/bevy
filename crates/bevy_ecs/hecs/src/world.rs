@@ -22,7 +22,9 @@ use bevy_utils::{HashMap, HashSet};
 use core::{
     any::TypeId,
     cmp::{Ord, Ordering},
-    fmt, mem, ptr,
+    fmt,
+    hash::{Hash, Hasher},
+    mem, ptr,
 };
 
 #[cfg(feature = "std")]
@@ -915,13 +917,31 @@ impl From<MissingComponent> for ComponentError {
 
 /// Uniquely identifies a type of component. This is conceptually similar to
 /// Rust's [`TypeId`], but allows for external type IDs to be defined.
-#[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ComponentId {
     /// A Rust-native [`TypeId`]
     RustTypeId(TypeId),
     /// An arbitrary ID that allows you to identify types defined outside of
     /// this Rust compilation
     ExternalId(u64),
+}
+
+#[allow(clippy::derive_hash_xor_eq)] // Fine because we uphold k1 == k2 ⇒ hash(k1) == hash(k2)
+impl Hash for ComponentId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            ComponentId::RustTypeId(id) => {
+                id.hash(state);
+                // Write a byte to distinguish the variants
+                state.write_u8(0);
+            }
+            ComponentId::ExternalId(id) => {
+                state.write_u64(*id);
+                // Write a byte to distinguish the variants
+                state.write_u8(1);
+            }
+        }
+    }
 }
 
 impl Default for ComponentId {
