@@ -12,7 +12,6 @@ use bevy::prelude::*;
 use bevy_app::ScheduleRunnerPlugin;
 use bevy_ecs::{
     ComponentId, DynamicComponentInfo, DynamicComponentQuery, DynamicSystemSettings, EntityBuilder,
-    TypeInfo,
 };
 
 /// Create a system for spawning the scene
@@ -29,15 +28,10 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
     // Then we add our "Position component"
     let entity1 = builder
         .add_dynamic(
-            // We need to describe our component's information
-            TypeInfo {
-                // We must provide a unique id for the compoonent
-                id: ComponentId::ExternalId(0),
-                // And we must specify the size and alignment of the component
-                layout: Layout::from_size_align(2 /* size */, 1 /* alignment */).unwrap(),
-                // And we must specify a drop function for our component
-                drop: |_| (),
-            },
+            // We must provide a unique id for the compoonent
+            ComponentId::ExternalId(0),
+            // And we must specify the size and alignment of the component
+            Layout::from_size_align(2 /* size */, 1 /* alignment */).unwrap(),
             // And provide the raw byte data data for the component
             vec![
                 0, // X position byte
@@ -48,12 +42,9 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
         )
         // Next we add our "Velocity component"
         .add_dynamic(
-            TypeInfo {
-                // This component needs its own unique ID
-                id: ComponentId::ExternalId(1),
-                layout: Layout::from_size_align(2 /* size */, 1 /* alignment */).unwrap(),
-                drop: |_| (),
-            },
+            // This component needs its own unique ID
+            ComponentId::ExternalId(1),
+            Layout::from_size_align(2 /* size */, 1 /* alignment */).unwrap(),
             vec![
                 0, // X position byte
                 1, // Y position byte
@@ -66,11 +57,8 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
     let mut builder = EntityBuilder::new();
     let entity2 = builder
         .add_dynamic(
-            TypeInfo {
-                id: ComponentId::ExternalId(0),
-                layout: Layout::from_size_align(2, 1).unwrap(),
-                drop: |_| (),
-            },
+            ComponentId::ExternalId(0),
+            Layout::from_size_align(2, 1).unwrap(),
             vec![
                 0, // X position byte
                 0, // Y position byte
@@ -78,11 +66,8 @@ fn spawn_scene(world: &mut World, _resources: &mut Resources) {
             .as_slice(),
         )
         .add_dynamic(
-            TypeInfo {
-                id: ComponentId::ExternalId(1),
-                layout: Layout::from_size_align(2, 1).unwrap(),
-                drop: |_| (),
-            },
+            ComponentId::ExternalId(1),
+            Layout::from_size_align(2, 1).unwrap(),
             vec![
                 2, // X position byte
                 0, // Y position byte

@@ -510,14 +510,23 @@ impl TypeState {
 #[derive(Debug, Copy, Clone)]
 pub struct TypeInfo {
     /// The ID unique to the component type
-    pub id: ComponentId,
+    id: ComponentId,
     /// The memory layout of the component
-    pub layout: Layout,
+    layout: Layout,
     /// The drop function for the component
-    pub drop: unsafe fn(*mut u8),
+    drop: unsafe fn(*mut u8),
 }
 
 impl TypeInfo {
+    /// Create a [`TypeInfo`] directly from an id and a layout
+    pub(crate) fn new_from_id_layout(id: ComponentId, layout: Layout) -> Self {
+        TypeInfo {
+            id,
+            layout,
+            drop: |_| (),
+        }
+    }
+
     /// Metadata for `T`
     pub fn of<T: 'static>() -> Self {
         unsafe fn drop_ptr<T>(x: *mut u8) {

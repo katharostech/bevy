@@ -65,7 +65,7 @@ impl EntityBuilder {
 
     /// Add `component` to the entity
     pub fn add<T: Component>(&mut self, component: T) -> &mut Self {
-        self.add_dynamic(TypeInfo::of::<T>(), unsafe {
+        self.add_with_typeinfo(TypeInfo::of::<T>(), unsafe {
             &*slice_from_raw_parts(
                 &component as *const T as *const u8,
                 std::mem::size_of::<T>(),
@@ -75,20 +75,23 @@ impl EntityBuilder {
         self
     }
 
-    /// Add a dynamic component to the entity
-    ///
-    /// You must provide the type info and a slice containing the component data
-    pub fn add_dynamic(&mut self, type_info: TypeInfo, data: &[u8]) -> &mut Self {
+    /// Add a dynamic component given the component ID, the layout and the raw data slice
+    pub fn add_dynamic(&mut self, id: ComponentId, layout: Layout, data: &[u8]) -> &mut Self {
+        self.add_with_typeinfo(TypeInfo::new_from_id_layout(id, layout), data);
+        self
+    }
+
+    fn add_with_typeinfo(&mut self, type_info: TypeInfo, data: &[u8]) -> &mut Self {
         debug_assert_eq!(type_info.layout().size(), data.len());
 
-        if !self.id_set.insert(type_info.id) {
+        if !self.id_set.insert(type_info.id()) {
             return self;
         }
-        let end = self.cursor + type_info.layout.size();
+        let end = self.cursor + type_info.layout().size();
         if end > self.storage.len() {
             self.grow(end);
         }
-        if type_info.layout.size() != 0 {
+        if type_info.layout().size() != 0 {
             unsafe {
                 copy_nonoverlapping(
                     data.as_ptr(),
