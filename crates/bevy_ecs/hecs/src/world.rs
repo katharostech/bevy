@@ -15,17 +15,11 @@
 // modified by Bevy contributors
 
 use crate::{
-    alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, BatchedIter, EntityReserver, Fetch,
-    Mut, QueryIter, RefMut,
+    alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, query_one::ReadOnlyQueryOne,
+    EntityReserver, Mut, RefMut, TypeInfo,
 };
 use bevy_utils::{HashMap, HashSet};
-use core::{
-    any::TypeId,
-    cmp::{Ord, Ordering},
-    fmt,
-    hash::{Hash, Hasher},
-    mem, ptr,
-};
+use core::{any::TypeId, cmp::Ord, fmt, hash::Hash, mem, ptr};
 
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -51,6 +45,7 @@ pub struct World {
     #[allow(missing_docs)]
     pub archetypes: Vec<Archetype>,
     archetype_generation: u64,
+    dynamic_component_info: HashMap<u64, TypeInfo>,
 }
 
 impl World {
@@ -67,6 +62,7 @@ impl World {
             archetypes,
             archetype_generation: 0,
             removed_components: HashMap::default(),
+            dynamic_component_info: HashMap::default(),
         }
     }
 
@@ -516,6 +512,25 @@ impl World {
             let arch = &mut self.archetypes[loc.archetype as usize];
             let mut info = arch.types().to_vec();
             for ty in components.type_info() {
+                #[cfg(feature = "dynamic-api")]
+                // If this is a dynamic component
+                if let ComponentId::ExternalId(id) = ty.id() {
+                    // If we've previously registered a component under this ID
+                    if let Some(registered) = self.dynamic_component_info.get(&id) {
+                        // Verify the type info is consistent with the information previously associated
+                        // to the type id.
+                        assert_eq!(
+                            &ty, registered,
+                            "Attempted to insert dynamic component with a different layout than \
+                            previously inserted component with the same type ID."
+                        );
+                    // If we've never added this component before
+                    } else {
+                        // Register the type with its info
+                        self.dynamic_component_info.insert(id, ty);
+                    }
+                }
+
                 if let Some(ptr) = arch.get_dynamic(ty.id(), ty.layout().size(), loc.index) {
                     ty.drop(ptr.as_ptr());
                 } else {
@@ -898,8 +913,12 @@ impl From<MissingComponent> for ComponentError {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
+use std::{cmp::Ordering, hash::Hasher};
+
 /// Uniquely identifies a type of component. This is conceptually similar to
 /// Rust's [`TypeId`], but allows for external type IDs to be defined.
+#[cfg(feature = "dynamic-api")]
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ComponentId {
     /// A Rust-native [`TypeId`]
@@ -909,6 +928,7 @@ pub enum ComponentId {
     ExternalId(u64),
 }
 
+#[cfg(feature = "dynamic-api")]
 #[allow(clippy::derive_hash_xor_eq)] // Fine because we uphold k1 == k2 ⇒ hash(k1) == hash(k2)
 impl Hash for ComponentId {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -923,6 +943,7 @@ impl Hash for ComponentId {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl Ord for ComponentId {
     fn cmp(&self, other: &Self) -> Ordering {
         if self == other {
@@ -944,15 +965,31 @@ impl Ord for ComponentId {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl PartialOrd for ComponentId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl From<TypeId> for ComponentId {
     fn from(item: TypeId) -> Self {
         ComponentId::RustTypeId(item)
+    }
+}
+
+/// A component identifier
+///
+/// Without the `dynamic-api` feature enabled, this is just a newtype around a Rust [`TypeId`].
+#[cfg(not(feature = "dynamic-api"))]
+#[derive(Eq, PartialEq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
+pub struct ComponentId(pub TypeId);
+
+#[cfg(not(feature = "dynamic-api"))]
+impl From<TypeId> for ComponentId {
+    fn from(item: TypeId) -> Self {
+        ComponentId(item)
     }
 }
 
@@ -1095,5 +1132,57 @@ where
 {
     fn len(&self) -> usize {
         self.inner.len()
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    #[should_panic(expected = "Attempted to insert dynamic component with a different layout")]
+    #[cfg(feature = "dynamic-api")]
+    fn inconsistent_dynamic_component_info_panics() {
+        use super::*;
+        use crate::{DynamicComponentInfo, EntityBuilder};
+        use core::alloc::Layout;
+
+        let mut world = World::new();
+
+        let mut builder = EntityBuilder::new();
+        // Create an entity with a dynamic component with an id of 1 and  size of 2
+        let bundle1 = builder
+            .add_dynamic(
+                DynamicComponentInfo {
+                    id: 1,
+                    layout: Layout::from_size_align(2, 1).unwrap(),
+                    drop: |_| (),
+                },
+                &[1, 2],
+            )
+            .build();
+        let mut builder = EntityBuilder::new();
+
+        // Insert the entity
+        let entity = world.reserve_entity();
+        world.insert(entity, bundle1).unwrap();
+
+        // Create an entity with a dynamic component with an id of 1 and  size of 3. This is an
+        // error because the component cannot have the same id of a previously inserted component
+        // and also have a different layout.
+        let bundle2 = builder
+            .add_dynamic(
+                DynamicComponentInfo {
+                    id: 1,
+                    layout: Layout::from_size_align(3, 1).unwrap(),
+                    drop: |_| (),
+                },
+                &[1, 2, 3],
+            )
+            .build();
+
+        // Insert the entity
+        let entity = world.reserve_entity();
+        // This should panic
+        world.insert(entity, bundle2).unwrap();
     }
 }

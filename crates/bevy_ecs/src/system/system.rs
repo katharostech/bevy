@@ -1,6 +1,10 @@
 use crate::resource::Resources;
-use bevy_hecs::{ArchetypeComponent, TypeAccess, World};
-use std::{any::TypeId, borrow::Cow};
+use bevy_hecs::{Access, ComponentId, Query, World};
+#[cfg(feature = "dynamic-api")]
+use bevy_hecs::{DynamicQuery, DynamicQueryBorrow};
+use bevy_utils::HashSet;
+use fixedbitset::FixedBitSet;
+use std::borrow::Cow;
 
 /// Determines the strategy used to run the `run_thread_local` function in a [System]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

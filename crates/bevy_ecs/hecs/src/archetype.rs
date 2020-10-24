@@ -32,7 +32,10 @@ use core::{
 };
 use std::collections::HashMap;
 
-use crate::{borrow::AtomicBorrow, Component};
+#[cfg(feature = "dynamic-api")]
+use std::collections::HashSet;
+
+use crate::{borrow::AtomicBorrow, query::Fetch, Access, Component, Query};
 
 /// A collection of entities having the same component types
 ///
@@ -243,7 +246,8 @@ impl Archetype {
         size: usize,
         index: usize,
     ) -> Option<NonNull<u8>> {
-        debug_assert!(index < self.len);
+        // TODO(zicklag): I'm pretty sure that it is valid for the index to be zero
+        debug_assert!(index < self.len || index == 0);
         Some(NonNull::new_unchecked(
             (*self.data.get())
                 .as_ptr()
@@ -500,11 +504,14 @@ impl TypeState {
 }
 
 /// Metadata required to store a component
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct TypeInfo {
-    id: ComponentId,
-    layout: Layout,
-    drop: unsafe fn(*mut u8),
+    /// The ID unique to the component type
+    pub(crate) id: ComponentId,
+    /// The memory layout of the component
+    pub(crate) layout: Layout,
+    /// The drop function for the component
+    pub(crate) drop: unsafe fn(*mut u8),
 }
 
 impl TypeInfo {
@@ -554,14 +561,6 @@ impl Ord for TypeInfo {
             .then_with(|| self.id.cmp(&other.id))
     }
 }
-
-impl PartialEq for TypeInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for TypeInfo {}
 
 fn align(x: usize, alignment: usize) -> usize {
     debug_assert!(alignment.is_power_of_two());
@@ -615,3 +614,9 @@ impl Hasher for ComponentIdHasher {
 /// hashbrown needs), there is no need to hash it again. Instead, this uses the much faster no-op
 /// hash.
 pub(crate) type ComponentIdMap<V> = HashMap<ComponentId, V, BuildHasherDefault<ComponentIdHasher>>;
+
+/// A HashSet with ComponentId keys
+///
+/// Serves the same purpose as [`ComponentIdMap`], but for a Set
+#[cfg(feature = "dynamic-api")]
+pub(crate) type ComponentIdSet = HashSet<ComponentId, BuildHasherDefault<ComponentIdHasher>>;
