@@ -1,5 +1,7 @@
 use crate::resource::Resources;
 use bevy_hecs::{Access, ComponentId, Query, World};
+#[cfg(feature = "dynamic-api")]
+use bevy_hecs::{DynamicQuery, DynamicQueryBorrow};
 use bevy_utils::HashSet;
 use fixedbitset::FixedBitSet;
 use std::borrow::Cow;
@@ -73,6 +75,25 @@ impl ArchetypeAccess {
             });
     }
 
+    #[cfg(feature = "dynamic-api")]
+    pub fn set_access_for_dynamic_query(&mut self, world: &World, query: &DynamicQuery) {
+        let iterator = world.archetypes();
+        let bits = iterator.len();
+        self.accessed.grow(bits);
+        self.mutable.grow(bits);
+        iterator
+            .enumerate()
+            .filter_map(|(index, archetype)| query.access(&archetype).map(|access| (index, access)))
+            .for_each(|(archetype, access)| match access {
+                Access::Read => self.accessed.set(archetype, true),
+                Access::Write => {
+                    self.accessed.set(archetype, true);
+                    self.mutable.set(archetype, true);
+                }
+                Access::Iterate => (),
+            });
+    }
+
     pub fn clear(&mut self) {
         self.accessed.clear();
         self.mutable.clear();
@@ -101,6 +122,111 @@ impl TypeAccess {
     pub fn clear(&mut self) {
         self.immutable.clear();
         self.mutable.clear();
+    }
+}
+
+#[cfg(feature = "dynamic-api")]
+pub struct DynamicSystem<S> {
+    pub name: String,
+    pub state: S,
+    system_id: SystemId,
+    archetype_access: ArchetypeAccess,
+    resource_access: TypeAccess,
+    settings: DynamicSystemSettings<S>,
+}
+
+#[cfg(feature = "dynamic-api")]
+pub struct DynamicSystemSettings<S> {
+    pub workload: fn(&mut S, &Resources, Vec<DynamicQueryBorrow>),
+    pub queries: Vec<DynamicQuery>,
+    pub thread_local_execution: ThreadLocalExecution,
+    pub thread_local_system: fn(&mut S, &mut World, &mut Resources),
+    pub init_function: fn(&mut S, &mut World, &mut Resources),
+    pub resource_access: TypeAccess,
+}
+
+#[cfg(feature = "dynamic-api")]
+impl<S> Default for DynamicSystemSettings<S> {
+    fn default() -> Self {
+        Self {
+            workload: |_, _, _| (),
+            queries: Default::default(),
+            thread_local_execution: ThreadLocalExecution::NextFlush,
+            thread_local_system: |_, _, _| (),
+            init_function: |_, _, _| (),
+            resource_access: Default::default(),
+        }
+    }
+}
+
+#[cfg(feature = "dynamic-api")]
+impl<S> DynamicSystem<S> {
+    pub fn new(name: String, state: S) -> Self {
+        DynamicSystem {
+            name,
+            state,
+            system_id: SystemId::new(),
+            resource_access: Default::default(),
+            archetype_access: Default::default(),
+            settings: Default::default(),
+        }
+    }
+
+    pub fn settings(mut self, settings: DynamicSystemSettings<S>) -> Self {
+        self.settings = settings;
+        self
+    }
+}
+
+#[cfg(feature = "dynamic-api")]
+impl<S: Send + Sync> System for DynamicSystem<S> {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        self.name.clone().into()
+    }
+
+    fn id(&self) -> SystemId {
+        self.system_id
+    }
+
+    fn update_archetype_access(&mut self, world: &World) {
+        // Clear previous archetype access list
+        self.archetype_access.clear();
+
+        for query in &self.settings.queries {
+            self.archetype_access
+                .set_access_for_dynamic_query(&world, query);
+        }
+    }
+
+    fn archetype_access(&self) -> &ArchetypeAccess {
+        &self.archetype_access
+    }
+
+    fn resource_access(&self) -> &TypeAccess {
+        &self.resource_access
+    }
+
+    fn thread_local_execution(&self) -> ThreadLocalExecution {
+        self.settings.thread_local_execution
+    }
+
+    fn run(&mut self, world: &World, resources: &Resources) {
+        let queries: Vec<_> = self
+            .settings
+            .queries
+            .iter()
+            .map(|query| DynamicQueryBorrow::new(world.archetypes.as_slice(), query))
+            .collect();
+
+        (self.settings.workload)(&mut self.state, resources, queries);
+    }
+
+    fn run_thread_local(&mut self, world: &mut World, resources: &mut Resources) {
+        (self.settings.thread_local_system)(&mut self.state, world, resources);
+    }
+
+    fn initialize(&mut self, world: &mut World, resources: &mut Resources) {
+        (self.settings.init_function)(&mut self.state, world, resources);
     }
 }
 

@@ -19,13 +19,7 @@ use crate::{
     EntityReserver, Mut, RefMut,
 };
 use bevy_utils::{HashMap, HashSet};
-use core::{
-    any::TypeId,
-    cmp::{Ord, Ordering},
-    fmt,
-    hash::{Hash, Hasher},
-    mem, ptr,
-};
+use core::{any::TypeId, cmp::Ord, fmt, hash::Hash, mem, ptr};
 
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -915,8 +909,12 @@ impl From<MissingComponent> for ComponentError {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
+use std::{cmp::Ordering, hash::Hasher};
+
 /// Uniquely identifies a type of component. This is conceptually similar to
 /// Rust's [`TypeId`], but allows for external type IDs to be defined.
+#[cfg(feature = "dynamic-api")]
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum ComponentId {
     /// A Rust-native [`TypeId`]
@@ -926,6 +924,7 @@ pub enum ComponentId {
     ExternalId(u64),
 }
 
+#[cfg(feature = "dynamic-api")]
 #[allow(clippy::derive_hash_xor_eq)] // Fine because we uphold k1 == k2 ⇒ hash(k1) == hash(k2)
 impl Hash for ComponentId {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -940,6 +939,7 @@ impl Hash for ComponentId {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl Ord for ComponentId {
     fn cmp(&self, other: &Self) -> Ordering {
         if self == other {
@@ -961,15 +961,31 @@ impl Ord for ComponentId {
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl PartialOrd for ComponentId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+#[cfg(feature = "dynamic-api")]
 impl From<TypeId> for ComponentId {
     fn from(item: TypeId) -> Self {
         ComponentId::RustTypeId(item)
+    }
+}
+
+/// A component identifier
+///
+/// Without the `dynamic-api` feature enabled, this is just a newtype around a Rust [`TypeId`].
+#[cfg(not(feature = "dynamic-api"))]
+#[derive(Eq, PartialEq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
+pub struct ComponentId(pub TypeId);
+
+#[cfg(not(feature = "dynamic-api"))]
+impl From<TypeId> for ComponentId {
+    fn from(item: TypeId) -> Self {
+        ComponentId(item)
     }
 }
 

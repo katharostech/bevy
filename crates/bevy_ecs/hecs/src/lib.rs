@@ -67,6 +67,8 @@ macro_rules! smaller_tuples_too {
 mod archetype;
 mod borrow;
 mod bundle;
+#[cfg(feature = "dynamic-api")]
+mod dynamic_query;
 mod entities;
 mod entity_builder;
 mod query;
@@ -75,9 +77,16 @@ mod query_one;
 mod serde;
 mod world;
 
+#[cfg(feture = "dynamic-api")]
+pub(crate) use dynamic_query::DynamicComponentInfoRegistry;
+
 pub use archetype::{Archetype, TypeState};
 pub use borrow::{AtomicBorrow, Ref, RefMut};
 pub use bundle::{Bundle, DynamicBundle, MissingComponent};
+#[cfg(feature = "dynamic-api")]
+pub use dynamic_query::{
+    DynamicComponentInfo, DynamicQuery, DynamicQueryBorrow, DYNAMIC_COMPONENT_INFO_REGISTRY,
+};
 pub use entities::{Entity, EntityReserver, Location, NoSuchEntity};
 pub use entity_builder::{BuiltEntity, EntityBuilder};
 pub use query::{
