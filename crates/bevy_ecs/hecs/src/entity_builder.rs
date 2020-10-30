@@ -90,6 +90,13 @@ impl EntityBuilder {
         self
     }
 
+    /// Add a dynamic component given the raw [`TypeInfo`] and the raw data slice
+    #[cfg(feature = "dynamic-api")]
+    pub fn add_typeinfo(&mut self, info: TypeInfo, data: &[u8]) -> &mut Self {
+        self.add_with_typeinfo(info, data, false);
+        self
+    }
+
     fn add_with_typeinfo(
         &mut self,
         type_info: TypeInfo,

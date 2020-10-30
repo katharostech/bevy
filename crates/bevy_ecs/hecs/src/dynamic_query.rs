@@ -86,6 +86,28 @@ impl DynamicQuery {
         self.mutable.push(info);
     }
 
+    /// Add an immutable query given the raw type info
+    ///
+    /// # Panics
+    /// Panics if the component has already been added to the query.
+    pub fn push_type_info(&mut self, info: TypeInfo) {
+        if self.info_collides(&info) {
+            panic!("Component already added to query: {:?}", info);
+        }
+        self.immutable.push(info);
+    }
+
+    /// Add a mutable query given the raw type info
+    ///
+    /// # Panics
+    /// Panics if the component has already been added to the query.
+    pub fn push_type_info_mut(&mut self, info: TypeInfo) {
+        if self.info_collides(&info) {
+            panic!("Component already added to query: {:?}", info);
+        }
+        self.mutable.push(info);
+    }
+
     /// Returns true if the given info collides with the info already present
     fn info_collides(&self, info: &TypeInfo) -> bool {
         for item in &self.immutable {
