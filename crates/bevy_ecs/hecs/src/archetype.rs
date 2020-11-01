@@ -35,7 +35,7 @@ use std::collections::HashMap;
 #[cfg(feature = "dynamic-api")]
 use std::collections::HashSet;
 
-use crate::{borrow::AtomicBorrow, query::Fetch, Access, Component, Query};
+use crate::{borrow::AtomicBorrow, Component};
 
 /// A collection of entities having the same component types
 ///
@@ -525,6 +525,15 @@ impl TypeInfo {
             id: TypeId::of::<T>().into(),
             layout: Layout::new::<T>(),
             drop: drop_ptr::<T>,
+        }
+    }
+
+    #[cfg(feature = "dynamic-api")]
+    pub fn of_dynamic(external_id: u64, layout: Layout, drop: unsafe fn(*mut u8)) -> Self {
+        TypeInfo {
+            id: ComponentId::ExternalId(external_id),
+            layout,
+            drop,
         }
     }
 

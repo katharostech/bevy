@@ -26,9 +26,6 @@ use crate::{
     world::ComponentId,
 };
 
-#[cfg(feature = "dynamic-api")]
-use crate::DynamicComponentInfo;
-
 use core::{intrinsics::copy_nonoverlapping, mem::MaybeUninit, ptr};
 use ptr::slice_from_raw_parts;
 
@@ -85,14 +82,7 @@ impl EntityBuilder {
 
     /// Add a dynamic component given the component ID, the layout and the raw data slice
     #[cfg(feature = "dynamic-api")]
-    pub fn add_dynamic(&mut self, info: DynamicComponentInfo, data: &[u8]) -> &mut Self {
-        self.add_with_typeinfo(info.into(), data, false);
-        self
-    }
-
-    /// Add a dynamic component given the raw [`TypeInfo`] and the raw data slice
-    #[cfg(feature = "dynamic-api")]
-    pub fn add_typeinfo(&mut self, info: TypeInfo, data: &[u8]) -> &mut Self {
+    pub fn add_dynamic(&mut self, info: TypeInfo, data: &[u8]) -> &mut Self {
         self.add_with_typeinfo(info, data, false);
         self
     }
@@ -255,13 +245,6 @@ mod test {
 
         // This should panic because we said above that the component size was 2, and we are trying
         // to stick 3 bytes into it.
-        builder.add_dynamic(
-            DynamicComponentInfo {
-                id: ID1,
-                layout: layout1,
-                drop: |_| (),
-            },
-            &[1, 2, 3],
-        );
+        builder.add_dynamic(TypeInfo::of_dynamic(ID1, layout1, |_| ()), &[1, 2, 3]);
     }
 }

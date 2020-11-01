@@ -77,7 +77,7 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     /// Gets the query result for the given `entity`
     pub fn get(&self, entity: Entity) -> Result<<Q::Fetch as Fetch>::Item, QueryError>
     where
-        Q::Fetch: ReadOnlyFetch,
+        Q::Fetch: ReadOnlyFetch + for<'b> Fetch<'b, State = ()>,
     {
         // SAFE: system runs without conflicts with other systems. same-system queries have runtime borrow checks when they conflict
         unsafe {
@@ -88,7 +88,10 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     }
 
     /// Gets the query result for the given `entity`
-    pub fn get_mut(&mut self, entity: Entity) -> Result<<Q::Fetch as Fetch>::Item, QueryError> {
+    pub fn get_mut(&mut self, entity: Entity) -> Result<<Q::Fetch as Fetch>::Item, QueryError>
+    where
+        Q::Fetch: for<'b> Fetch<'b, State = ()>,
+    {
         // SAFE: system runs without conflicts with other systems. same-system queries have runtime borrow checks when they conflict
         unsafe {
             self.world
@@ -103,7 +106,10 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     pub unsafe fn entity_unsafe(
         &self,
         entity: Entity,
-    ) -> Result<<Q::Fetch as Fetch>::Item, QueryError> {
+    ) -> Result<<Q::Fetch as Fetch>::Item, QueryError>
+    where
+        Q::Fetch: for<'b> Fetch<'b, State = ()>,
+    {
         self.world
             .query_one_unchecked::<Q>(entity)
             .map_err(|_err| QueryError::NoSuchEntity)
@@ -196,7 +202,10 @@ impl<'w, Q: HecsQuery> ParIter<'w, Q> {
 
 unsafe impl<'w, Q: HecsQuery> Send for ParIter<'w, Q> {}
 
-impl<'w, Q: HecsQuery> ParallelIterator<Batch<'w, Q>> for ParIter<'w, Q> {
+impl<'w, Q: HecsQuery> ParallelIterator<Batch<'w, Q>> for ParIter<'w, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Item = <Q::Fetch as Fetch<'w>>::Item;
 
     #[inline]

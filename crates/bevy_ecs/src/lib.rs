@@ -19,7 +19,4 @@ pub mod prelude {
         Added, Bundle, Changed, Component, Entity, Mut, Mutated, Or, QuerySet, Ref, RefMut, With,
         Without, World,
     };
-
-    #[cfg(feature = "dynamic-api")]
-    pub use crate::system::{DynamicSystem, DynamicSystemSettings};
 }

@@ -13,7 +13,7 @@ use bevy_asset::{Assets, Handle};
 use bevy_ecs::{
     FetchResource, Query, Res, ResMut, ResourceIndex, ResourceQuery, Resources, SystemId,
     TypeAccess, UnsafeClone,
-};
+ComponentId};
 use bevy_property::Properties;
 use std::{any::TypeId, ops::Range, sync::Arc};
 use thiserror::Error;
@@ -208,7 +208,7 @@ impl<'a> FetchResource<'a> for FetchDrawContext {
         }
     }
 
-    fn access() -> TypeAccess<TypeId> {
+    fn access() -> TypeAccess<ComponentId> {
         let mut access = TypeAccess::default();
         access.add_write(TypeId::of::<Assets<PipelineDescriptor>>().into());
         access.add_write(TypeId::of::<Assets<Shader>>().into());

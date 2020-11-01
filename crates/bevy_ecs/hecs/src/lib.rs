@@ -79,11 +79,12 @@ mod world;
 #[cfg(feture = "dynamic-api")]
 pub(crate) use dynamic_query::DynamicComponentInfoRegistry;
 
+pub use access::{Access, ArchetypeComponent, QueryAccess, TypeAccess};
 pub use archetype::{Archetype, TypeState};
 pub use borrow::{AtomicBorrow, Ref, RefMut};
 pub use bundle::{Bundle, DynamicBundle, MissingComponent};
-#[cfg(feature = "dynamic-api")]
-pub use dynamic_query::{DynamicComponentInfo, DynamicQuery, DynamicQueryBorrow};
+// #[cfg(feature = "dynamic-api")]
+// pub use dynamic_query::{DynamicQuery, DynamicQueryBorrow};
 pub use entities::{Entity, EntityReserver, Location, NoSuchEntity};
 pub use entity_builder::{BuiltEntity, EntityBuilder};
 pub use query::{

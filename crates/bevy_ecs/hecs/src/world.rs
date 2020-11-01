@@ -15,8 +15,8 @@
 // modified by Bevy contributors
 
 use crate::{
-    alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, query_one::ReadOnlyQueryOne,
-    EntityReserver, Mut, RefMut, TypeInfo,
+    alloc::vec::Vec, borrow::EntityRef, query::ReadOnlyFetch, BatchedIter, EntityReserver, Fetch,
+    Mut, QueryIter, RefMut, TypeInfo,
 };
 use bevy_utils::{HashMap, HashSet};
 use core::{any::TypeId, cmp::Ord, fmt, hash::Hash, mem, ptr};
@@ -354,7 +354,7 @@ impl World {
         entity: Entity,
     ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
     where
-        Q::Fetch: ReadOnlyFetch,
+        Q::Fetch: ReadOnlyFetch + for<'a> Fetch<'a, State = ()>
     {
         // SAFE: read-only access to world and read only query prevents mutable access
         unsafe { self.query_one_unchecked::<Q>(entity) }
@@ -377,7 +377,10 @@ impl World {
     pub fn query_one_mut<Q: Query>(
         &mut self,
         entity: Entity,
-    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity> {
+    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = ()>
+    {
         // SAFE: unique mutable access to world
         unsafe { self.query_one_unchecked::<Q>(entity) }
     }
@@ -392,11 +395,14 @@ impl World {
     pub unsafe fn query_one_unchecked<Q: Query>(
         &self,
         entity: Entity,
-    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity> {
+    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    {
         let loc = self.entities.get(entity)?;
-        <Q::Fetch as Fetch>::get(&self.archetypes[loc.archetype as usize], 0)
-            .filter(|fetch| !fetch.should_skip(loc.index))
-            .map(|fetch| fetch.fetch(loc.index))
+        <Q::Fetch as Fetch>::get(&(), &self.archetypes[loc.archetype as usize], 0)
+            .filter(|fetch| !fetch.should_skip(&(), loc.index))
+            .map(|fetch| fetch.fetch(&(), loc.index))
             .ok_or(NoSuchEntity)
     }
 
@@ -1137,13 +1143,12 @@ where
 
 #[cfg(test)]
 mod test {
-
     #[test]
     #[should_panic(expected = "Attempted to insert dynamic component with a different layout")]
     #[cfg(feature = "dynamic-api")]
     fn inconsistent_dynamic_component_info_panics() {
         use super::*;
-        use crate::{DynamicComponentInfo, EntityBuilder};
+        use crate::EntityBuilder;
         use core::alloc::Layout;
 
         let mut world = World::new();
@@ -1152,11 +1157,7 @@ mod test {
         // Create an entity with a dynamic component with an id of 1 and  size of 2
         let bundle1 = builder
             .add_dynamic(
-                DynamicComponentInfo {
-                    id: 1,
-                    layout: Layout::from_size_align(2, 1).unwrap(),
-                    drop: |_| (),
-                },
+                TypeInfo::of_dynamic(1, Layout::from_size_align(2, 1).unwrap(), |_| ()),
                 &[1, 2],
             )
             .build();
@@ -1171,11 +1172,7 @@ mod test {
         // and also have a different layout.
         let bundle2 = builder
             .add_dynamic(
-                DynamicComponentInfo {
-                    id: 1,
-                    layout: Layout::from_size_align(3, 1).unwrap(),
-                    drop: |_| (),
-                },
+                TypeInfo::of_dynamic(1, Layout::from_size_align(3, 1).unwrap(), |_| ()),
                 &[1, 2, 3],
             )
             .build();

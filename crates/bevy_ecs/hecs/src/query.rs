@@ -41,24 +41,27 @@ pub trait Fetch<'a>: Sized {
     /// Type of value to be fetched
     type Item;
 
+    /// The query state
+    type State;
+
     /// A value on which `get` may never be called
     #[allow(clippy::declare_interior_mutable_const)] // no const fn in traits
     const DANGLING: Self;
 
     /// How this query will access `archetype`, if at all
-    fn access() -> QueryAccess;
+    fn access(state: &Self::State) -> QueryAccess;
 
     /// Construct a `Fetch` for `archetype` if it should be traversed
     ///
     /// # Safety
     /// `offset` must be in bounds of `archetype`
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self>;
+    unsafe fn get(state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self>;
 
     /// if this returns true, the nth item should be skipped during iteration
     ///
     /// # Safety
     /// shouldn't be called if there is no current item
-    unsafe fn should_skip(&self, _n: usize) -> bool {
+    unsafe fn should_skip(&self, _state: &Self::State, _n: usize) -> bool {
         false
     }
 
@@ -69,7 +72,7 @@ pub trait Fetch<'a>: Sized {
     /// - `release` must not be called while `'a` is still live
     /// - Bounds-checking must be performed externally
     /// - Any resulting borrows must be legal (e.g. no &mut to something another iterator might access)
-    unsafe fn fetch(&self, n: usize) -> Self::Item;
+    unsafe fn fetch(&self, state: &Self::State, n: usize) -> Self::Item;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -83,23 +86,24 @@ impl Query for Entity {
 
 impl<'a> Fetch<'a> for EntityFetch {
     type Item = Entity;
+    type State = ();
 
     const DANGLING: Self = Self(NonNull::dangling());
 
     #[inline]
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         Some(EntityFetch(NonNull::new_unchecked(
             archetype.entities().as_ptr().add(offset),
         )))
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> Self::Item {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
         *self.0.as_ptr().add(n)
     }
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::None
     }
 }
@@ -116,22 +120,23 @@ impl<T> UnfilteredFetch for FetchRead<T> {}
 
 impl<'a, T: Component> Fetch<'a> for FetchRead<T> {
     type Item = &'a T;
+    type State = ();
 
     const DANGLING: Self = Self(NonNull::dangling());
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         archetype
             .get::<T>()
             .map(|x| Self(NonNull::new_unchecked(x.as_ptr().add(offset))))
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> &'a T {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> &'a T {
         &*self.0.as_ptr().add(n)
     }
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::read::<T>()
     }
 }
@@ -140,7 +145,10 @@ impl<'a, T: Component> Query for &'a mut T {
     type Fetch = FetchMut<T>;
 }
 
-impl<T: Query> Query for Option<T> {
+impl<T: Query> Query for Option<T>
+where
+    T::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Fetch = TryFetch<T::Fetch>;
 }
 
@@ -201,10 +209,11 @@ impl<T> UnfilteredFetch for FetchMut<T> {}
 
 impl<'a, T: Component> Fetch<'a> for FetchMut<T> {
     type Item = Mut<'a, T>;
+    type State = ();
 
     const DANGLING: Self = Self(NonNull::dangling(), NonNull::dangling());
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         archetype
             .get_with_type_state::<T>()
             .map(|(components, type_state)| {
@@ -216,7 +225,7 @@ impl<'a, T: Component> Fetch<'a> for FetchMut<T> {
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> Mut<'a, T> {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Mut<'a, T> {
         Mut {
             value: &mut *self.0.as_ptr().add(n),
             mutated: &mut *self.1.as_ptr().add(n),
@@ -224,43 +233,47 @@ impl<'a, T: Component> Fetch<'a> for FetchMut<T> {
     }
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::write::<T>()
     }
 }
 
 macro_rules! impl_or_query {
     ( $( $T:ident ),+ ) => {
-        impl<$( $T: Query ),+> Query for Or<($( $T ),+)> {
+        impl<$( $T: Query ),+> Query for Or<($( $T ),+)>
+        where
+            $($T::Fetch: for<'a> Fetch<'a, State = ()>),+
+        {
             type Fetch = FetchOr<($( $T::Fetch ),+)>;
         }
 
-        impl<'a, $( $T: Fetch<'a> ),+> Fetch<'a> for FetchOr<($( $T ),+)> {
+        impl<'a, $( $T: Fetch<'a, State=()> ),+> Fetch<'a> for FetchOr<($( $T ),+)> {
             type Item = ($( $T::Item ),+);
+            type State = ();
 
             const DANGLING: Self = Self(($( $T::DANGLING ),+));
 
-            fn access() -> QueryAccess {
+            fn access(_state: &Self::State, ) -> QueryAccess {
                 QueryAccess::union(vec![
-                    $($T::access(),)+
+                    $($T::access(&()),)+
                 ])
             }
 
 
-            unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
-                Some(Self(( $( $T::get(archetype, offset)?),+ )))
+            unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
+                Some(Self(( $( $T::get(&(), archetype, offset)?),+ )))
             }
 
             #[allow(non_snake_case)]
-            unsafe fn fetch(&self, n: usize) -> Self::Item {
+            unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
                 let ($( $T ),+) = &self.0;
-                ($( $T.fetch(n) ),+)
+                ($( $T.fetch(&(), n) ),+)
             }
 
              #[allow(non_snake_case)]
-            unsafe fn should_skip(&self, n: usize) -> bool {
+            unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
                 let ($( $T ),+) = &self.0;
-                true $( && $T.should_skip(n) )+
+                true $( && $T.should_skip(&(), n) )+
             }
         }
     };
@@ -323,15 +336,16 @@ pub struct FetchMutated<T>(NonNull<T>, NonNull<bool>);
 
 impl<'a, T: Component> Fetch<'a> for FetchMutated<T> {
     type Item = Mutated<'a, T>;
+    type State = ();
 
     const DANGLING: Self = Self(NonNull::dangling(), NonNull::dangling());
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::read::<T>()
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         archetype
             .get_with_type_state::<T>()
             .map(|(components, type_state)| {
@@ -342,13 +356,13 @@ impl<'a, T: Component> Fetch<'a> for FetchMutated<T> {
             })
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
         // skip if the current item wasn't mutated
         !*self.1.as_ptr().add(n)
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> Self::Item {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
         Mutated {
             value: &*self.0.as_ptr().add(n),
         }
@@ -379,15 +393,16 @@ unsafe impl<T> ReadOnlyFetch for FetchAdded<T> {}
 
 impl<'a, T: Component> Fetch<'a> for FetchAdded<T> {
     type Item = Added<'a, T>;
+    type State = ();
 
     const DANGLING: Self = Self(NonNull::dangling(), NonNull::dangling());
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::read::<T>()
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         archetype
             .get_with_type_state::<T>()
             .map(|(components, type_state)| {
@@ -398,13 +413,13 @@ impl<'a, T: Component> Fetch<'a> for FetchAdded<T> {
             })
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
         // skip if the current item wasn't added
         !*self.1.as_ptr().add(n)
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> Self::Item {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
         Added {
             value: &*self.0.as_ptr().add(n),
         }
@@ -435,6 +450,7 @@ unsafe impl<T> ReadOnlyFetch for FetchChanged<T> {}
 
 impl<'a, T: Component> Fetch<'a> for FetchChanged<T> {
     type Item = Changed<'a, T>;
+    type State = ();
 
     const DANGLING: Self = Self(
         NonNull::dangling(),
@@ -443,11 +459,11 @@ impl<'a, T: Component> Fetch<'a> for FetchChanged<T> {
     );
 
     #[inline]
-    fn access() -> QueryAccess {
+    fn access(_state: &Self::State) -> QueryAccess {
         QueryAccess::read::<T>()
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         archetype
             .get_with_type_state::<T>()
             .map(|(components, type_state)| {
@@ -459,13 +475,13 @@ impl<'a, T: Component> Fetch<'a> for FetchChanged<T> {
             })
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
         // skip if the current item wasn't added or mutated
         !*self.1.as_ptr().add(n) && !*self.2.as_ptr().add(n)
     }
 
     #[inline]
-    unsafe fn fetch(&self, n: usize) -> Self::Item {
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
         Changed {
             value: &*self.0.as_ptr().add(n),
         }
@@ -477,26 +493,29 @@ pub struct TryFetch<T>(Option<T>);
 unsafe impl<T> ReadOnlyFetch for TryFetch<T> where T: ReadOnlyFetch {}
 impl<T> UnfilteredFetch for TryFetch<T> where T: UnfilteredFetch {}
 
-impl<'a, T: Fetch<'a>> Fetch<'a> for TryFetch<T> {
+impl<'a, T: Fetch<'a, State = ()>> Fetch<'a> for TryFetch<T> {
     type Item = Option<T::Item>;
+    type State = ();
 
     const DANGLING: Self = Self(None);
 
     #[inline]
-    fn access() -> QueryAccess {
-        QueryAccess::optional(T::access())
+    fn access(_state: &Self::State) -> QueryAccess {
+        QueryAccess::optional(T::access(&()))
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
-        Some(Self(T::get(archetype, offset)))
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
+        Some(Self(T::get(&(), archetype, offset)))
     }
 
-    unsafe fn fetch(&self, n: usize) -> Option<T::Item> {
-        Some(self.0.as_ref()?.fetch(n))
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Option<T::Item> {
+        Some(self.0.as_ref()?.fetch(&(), n))
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
-        self.0.as_ref().map_or(false, |fetch| fetch.should_skip(n))
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
+        self.0
+            .as_ref()
+            .map_or(false, |fetch| fetch.should_skip(&(), n))
     }
 }
 
@@ -518,41 +537,45 @@ impl<'a, T: Fetch<'a>> Fetch<'a> for TryFetch<T> {
 /// ```
 pub struct Without<T, Q>(PhantomData<(Q, fn(T))>);
 
-impl<T: Component, Q: Query> Query for Without<T, Q> {
+impl<T: Component, Q: Query> Query for Without<T, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Fetch = FetchWithout<T, Q::Fetch>;
 }
 
 #[doc(hidden)]
 pub struct FetchWithout<T, F>(F, PhantomData<fn(T)>);
-unsafe impl<'a, T: Component, F: Fetch<'a>> ReadOnlyFetch for FetchWithout<T, F> where
+unsafe impl<'a, T: Component, F: Fetch<'a, State = ()>> ReadOnlyFetch for FetchWithout<T, F> where
     F: ReadOnlyFetch
 {
 }
 impl<T, F> UnfilteredFetch for FetchWithout<T, F> where F: UnfilteredFetch {}
 
-impl<'a, T: Component, F: Fetch<'a>> Fetch<'a> for FetchWithout<T, F> {
+impl<'a, T: Component, F: Fetch<'a, State = ()>> Fetch<'a> for FetchWithout<T, F> {
     type Item = F::Item;
+    type State = ();
 
     const DANGLING: Self = Self(F::DANGLING, PhantomData);
 
     #[inline]
-    fn access() -> QueryAccess {
-        QueryAccess::without::<T>(F::access())
+    fn access(_state: &Self::State) -> QueryAccess {
+        QueryAccess::without::<T>(F::access(&()))
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         if archetype.has::<T>() {
             return None;
         }
-        Some(Self(F::get(archetype, offset)?, PhantomData))
+        Some(Self(F::get(&(), archetype, offset)?, PhantomData))
     }
 
-    unsafe fn fetch(&self, n: usize) -> F::Item {
-        self.0.fetch(n)
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> F::Item {
+        self.0.fetch(&(), n)
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
-        self.0.should_skip(n)
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
+        self.0.should_skip(&(), n)
     }
 }
 
@@ -576,7 +599,10 @@ impl<'a, T: Component, F: Fetch<'a>> Fetch<'a> for FetchWithout<T, F> {
 /// ```
 pub struct With<T, Q>(PhantomData<(Q, fn(T))>);
 
-impl<T: Component, Q: Query> Query for With<T, Q> {
+impl<T: Component, Q: Query> Query for With<T, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Fetch = FetchWith<T, Q::Fetch>;
 }
 
@@ -585,29 +611,30 @@ pub struct FetchWith<T, F>(F, PhantomData<fn(T)>);
 unsafe impl<'a, T: Component, F: Fetch<'a>> ReadOnlyFetch for FetchWith<T, F> where F: ReadOnlyFetch {}
 impl<T, F> UnfilteredFetch for FetchWith<T, F> where F: UnfilteredFetch {}
 
-impl<'a, T: Component, F: Fetch<'a>> Fetch<'a> for FetchWith<T, F> {
+impl<'a, T: Component, F: Fetch<'a, State = ()>> Fetch<'a> for FetchWith<T, F> {
     type Item = F::Item;
+    type State = ();
 
     const DANGLING: Self = Self(F::DANGLING, PhantomData);
 
     #[inline]
-    fn access() -> QueryAccess {
-        QueryAccess::with::<T>(F::access())
+    fn access(_state: &Self::State) -> QueryAccess {
+        QueryAccess::with::<T>(F::access(&()))
     }
 
-    unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
+    unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
         if !archetype.has::<T>() {
             return None;
         }
-        Some(Self(F::get(archetype, offset)?, PhantomData))
+        Some(Self(F::get(&(), archetype, offset)?, PhantomData))
     }
 
-    unsafe fn fetch(&self, n: usize) -> F::Item {
-        self.0.fetch(n)
+    unsafe fn fetch(&self, _state: &Self::State, n: usize) -> F::Item {
+        self.0.fetch(&(), n)
     }
 
-    unsafe fn should_skip(&self, n: usize) -> bool {
-        self.0.should_skip(n)
+    unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
+        self.0.should_skip(&(), n)
     }
 }
 
@@ -644,7 +671,10 @@ impl<'w, Q: Query> QueryIter<'w, Q> {
     }
 }
 
-impl<'w, Q: Query> Iterator for QueryIter<'w, Q> {
+impl<'w, Q: Query> Iterator for QueryIter<'w, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Item = <Q::Fetch as Fetch<'w>>::Item;
 
     #[inline]
@@ -655,7 +685,7 @@ impl<'w, Q: Query> Iterator for QueryIter<'w, Q> {
                     let archetype = self.archetypes.get(self.archetype_index)?;
                     self.archetype_index += 1;
                     self.chunk_position = 0;
-                    self.chunk_info = Q::Fetch::get(archetype, 0)
+                    self.chunk_info = Q::Fetch::get(&(), archetype, 0)
                         .map(|fetch| ChunkInfo {
                             fetch,
                             len: archetype.len(),
@@ -667,13 +697,17 @@ impl<'w, Q: Query> Iterator for QueryIter<'w, Q> {
                 if self
                     .chunk_info
                     .fetch
-                    .should_skip(self.chunk_position as usize)
+                    .should_skip(&(), self.chunk_position as usize)
                 {
                     self.chunk_position += 1;
                     continue;
                 }
 
-                let item = Some(self.chunk_info.fetch.fetch(self.chunk_position as usize));
+                let item = Some(
+                    self.chunk_info
+                        .fetch
+                        .fetch(&(), self.chunk_position as usize),
+                );
                 self.chunk_position += 1;
                 return item;
             }
@@ -685,12 +719,12 @@ impl<'w, Q: Query> Iterator for QueryIter<'w, Q> {
 // the length of each matching archetype
 impl<'w, Q: Query> ExactSizeIterator for QueryIter<'w, Q>
 where
-    Q::Fetch: UnfilteredFetch,
+    Q::Fetch: UnfilteredFetch + for<'a> Fetch<'a, State = ()>,
 {
     fn len(&self) -> usize {
         self.archetypes
             .iter()
-            .filter(|&archetype| unsafe { Q::Fetch::get(archetype, 0).is_some() })
+            .filter(|&archetype| unsafe { Q::Fetch::get(&(), archetype, 0).is_some() })
             .map(|x| x.len())
             .sum()
     }
@@ -702,19 +736,22 @@ struct ChunkIter<Q: Query> {
     len: usize,
 }
 
-impl<Q: Query> ChunkIter<Q> {
+impl<Q: Query> ChunkIter<Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     unsafe fn next<'a>(&mut self) -> Option<<Q::Fetch as Fetch<'a>>::Item> {
         loop {
             if self.position == self.len {
                 return None;
             }
 
-            if self.fetch.should_skip(self.position as usize) {
+            if self.fetch.should_skip(&(), self.position as usize) {
                 self.position += 1;
                 continue;
             }
 
-            let item = Some(self.fetch.fetch(self.position as usize));
+            let item = Some(self.fetch.fetch(&(), self.position as usize));
             self.position += 1;
             return item;
         }
@@ -745,7 +782,10 @@ impl<'w, Q: Query> BatchedIter<'w, Q> {
 unsafe impl<'w, Q: Query> Send for BatchedIter<'w, Q> {}
 unsafe impl<'w, Q: Query> Sync for BatchedIter<'w, Q> {}
 
-impl<'w, Q: Query> Iterator for BatchedIter<'w, Q> {
+impl<'w, Q: Query> Iterator for BatchedIter<'w, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Item = Batch<'w, Q>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -757,7 +797,7 @@ impl<'w, Q: Query> Iterator for BatchedIter<'w, Q> {
                 self.batch = 0;
                 continue;
             }
-            if let Some(fetch) = unsafe { Q::Fetch::get(archetype, offset) } {
+            if let Some(fetch) = unsafe { Q::Fetch::get(&(), archetype, offset) } {
                 self.batch += 1;
                 return Some(Batch {
                     _marker: PhantomData,
@@ -785,7 +825,10 @@ pub struct Batch<'q, Q: Query> {
     state: ChunkIter<Q>,
 }
 
-impl<'q, 'w, Q: Query> Iterator for Batch<'q, Q> {
+impl<'q, 'w, Q: Query> Iterator for Batch<'q, Q>
+where
+    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+{
     type Item = <Q::Fetch as Fetch<'q>>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -799,38 +842,42 @@ unsafe impl<'q, Q: Query> Sync for Batch<'q, Q> {}
 
 macro_rules! tuple_impl {
     ($($name: ident),*) => {
-        impl<'a, $($name: Fetch<'a>),*> Fetch<'a> for ($($name,)*) {
+        impl<'a, $($name: Fetch<'a, State = ()>),*> Fetch<'a> for ($($name,)*) {
             type Item = ($($name::Item,)*);
+            type State = ();
             const DANGLING: Self = ($($name::DANGLING,)*);
 
             #[allow(unused_variables, unused_mut)]
-            fn access() -> QueryAccess {
+            fn access(_state: &Self::State) -> QueryAccess {
                 QueryAccess::union(vec![
-                    $($name::access(),)*
+                    $($name::access(&()),)*
                 ])
             }
 
             #[allow(unused_variables)]
-            unsafe fn get(archetype: &'a Archetype, offset: usize) -> Option<Self> {
-                Some(($($name::get(archetype, offset)?,)*))
+            unsafe fn get(_state: &Self::State, archetype: &'a Archetype, offset: usize) -> Option<Self> {
+                Some(($($name::get(&(), archetype, offset)?,)*))
             }
 
             #[allow(unused_variables)]
-            unsafe fn fetch(&self, n: usize) -> Self::Item {
+            unsafe fn fetch(&self, _state: &Self::State, n: usize) -> Self::Item {
                 #[allow(non_snake_case)]
                 let ($($name,)*) = self;
-                ($($name.fetch(n),)*)
+                ($($name.fetch(&(), n),)*)
             }
 
             #[allow(unused_variables)]
-            unsafe fn should_skip(&self, n: usize) -> bool {
+            unsafe fn should_skip(&self, _state: &Self::State, n: usize) -> bool {
                 #[allow(non_snake_case)]
                 let ($($name,)*) = self;
-                $($name.should_skip(n)||)* false
+                $($name.should_skip(&(), n)||)* false
             }
         }
 
-        impl<$($name: Query),*> Query for ($($name,)*) {
+        impl<$($name: Query),*> Query for ($($name,)*)
+        where
+            $($name::Fetch: for<'a> Fetch<'a, State = ()>),*
+        {
             type Fetch = ($($name::Fetch,)*);
         }
 
