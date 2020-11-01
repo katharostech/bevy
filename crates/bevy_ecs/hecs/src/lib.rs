@@ -67,8 +67,6 @@ mod access;
 mod archetype;
 mod borrow;
 mod bundle;
-#[cfg(feature = "dynamic-api")]
-mod dynamic_query;
 mod entities;
 mod entity_builder;
 mod query;

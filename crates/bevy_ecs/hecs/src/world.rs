@@ -251,12 +251,20 @@ impl World {
     /// assert!(entities.contains(&(a, 123, true)));
     /// assert!(entities.contains(&(b, 456, false)));
     /// ```
-    pub fn query<Q: Query>(&self) -> QueryIter<'_, Q>
+    #[inline]
+    pub fn query<Q: Query>(&self) -> QueryIter<'static, '_, Q, ()>
+    where
+        Q::Fetch: ReadOnlyFetch,
+    {
+        self.query_stateful(&())
+    }
+
+    pub fn query_stateful<'s, Q: Query, S>(&self, state: &'s S) -> QueryIter<'s, '_, Q, S>
     where
         Q::Fetch: ReadOnlyFetch,
     {
         // SAFE: read-only access to world and read only query prevents mutable access
-        unsafe { self.query_unchecked() }
+        unsafe { self.query_unchecked_stateful(state) }
     }
 
     /// Efficiently iterate over all entities that have certain components
@@ -283,26 +291,61 @@ impl World {
     /// assert!(entities.contains(&(a, 123, true)));
     /// assert!(entities.contains(&(b, 456, false)));
     /// ```
-    pub fn query_mut<Q: Query>(&mut self) -> QueryIter<'_, Q> {
+    #[inline]
+    pub fn query_mut<Q: Query>(&mut self) -> QueryIter<'static, '_, Q, ()> {
+        self.query_mut_stateful(&())
+    }
+
+    /// See [`query_mut`], except that this allows you to pass in query state if the query supports
+    /// it.
+    pub fn query_mut_stateful<'s, Q: Query, S>(&mut self, state: &'s S) -> QueryIter<'s, '_, Q, S> {
         // SAFE: unique mutable access
-        unsafe { self.query_unchecked() }
+        unsafe { self.query_unchecked_stateful(state) }
     }
 
     /// Like `query`, but instead of returning a single iterator it returns a "batched iterator",
     /// where each batch is `batch_size`. This is generally used for parallel iteration.
-    pub fn query_batched<Q: Query>(&self, batch_size: usize) -> BatchedIter<'_, Q>
+    #[inline]
+    pub fn query_batched<Q: Query>(&self, batch_size: usize) -> BatchedIter<'static, '_, Q, ()>
+    where
+        Q::Fetch: ReadOnlyFetch,
+    {
+        self.query_batched_stateful(batch_size, &())
+    }
+
+    /// See [`query_batched`], except that this allows you to pass in query state if the query
+    /// supports it.
+    pub fn query_batched_stateful<'s, Q: Query, S>(
+        &self,
+        batch_size: usize,
+        state: &'s S,
+    ) -> BatchedIter<'s, '_, Q, S>
     where
         Q::Fetch: ReadOnlyFetch,
     {
         // SAFE: read-only access to world and read only query prevents mutable access
-        unsafe { self.query_batched_unchecked(batch_size) }
+        unsafe { self.query_batched_unchecked_stateful(batch_size, state) }
     }
 
     /// Like `query`, but instead of returning a single iterator it returns a "batched iterator",
     /// where each batch is `batch_size`. This is generally used for parallel iteration.
-    pub fn query_batched_mut<Q: Query>(&mut self, batch_size: usize) -> BatchedIter<'_, Q> {
+    #[inline]
+    pub fn query_batched_mut<Q: Query>(
+        &mut self,
+        batch_size: usize,
+    ) -> BatchedIter<'static, '_, Q, ()> {
+        self.query_batched_mut_stateful(batch_size, &())
+    }
+
+    /// See [`query_batched_mut`], except that this allows you to pass in query
+    /// state if the query supports it.
+    pub fn query_batched_mut_stateful<'s, Q: Query, S>(
+        &mut self,
+        batch_size: usize,
+        state: &'s S,
+    ) -> BatchedIter<'s, '_, Q, S> {
         // SAFE: unique mutable access
-        unsafe { self.query_batched_unchecked(batch_size) }
+        unsafe { self.query_batched_unchecked_stateful(batch_size, state) }
     }
 
     /// Efficiently iterate over all entities that have certain components
@@ -318,8 +361,19 @@ impl World {
     /// # Safety
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
-    pub unsafe fn query_unchecked<Q: Query>(&self) -> QueryIter<'_, Q> {
-        QueryIter::new(&self.archetypes)
+    #[inline]
+    pub unsafe fn query_unchecked<Q: Query>(&self) -> QueryIter<'static, '_, Q, ()> {
+        self.query_unchecked_stateful(&())
+    }
+
+    /// See [`query_unchecked`], except that this allows you to pass in query state if the query
+    /// supports it.
+    #[inline]
+    pub unsafe fn query_unchecked_stateful<'s, Q: Query, S>(
+        &self,
+        state: &'s S,
+    ) -> QueryIter<'s, '_, Q, S> {
+        QueryIter::new(&self.archetypes, state)
     }
 
     /// Like `query`, but instead of returning a single iterator it returns a "batched iterator",
@@ -332,8 +386,19 @@ impl World {
     pub unsafe fn query_batched_unchecked<Q: Query>(
         &self,
         batch_size: usize,
-    ) -> BatchedIter<'_, Q> {
-        BatchedIter::new(&self.archetypes, batch_size)
+    ) -> BatchedIter<'static, '_, Q, ()> {
+        self.query_batched_unchecked_stateful(batch_size, &())
+    }
+
+    /// See [`query_batched_unchecked`], except that this allows you to pass in query state if the
+    /// query supports it.
+    #[inline]
+    pub unsafe fn query_batched_unchecked_stateful<'s, Q: Query, S>(
+        &self,
+        batch_size: usize,
+        state: &'s S,
+    ) -> BatchedIter<'s, '_, Q, S> {
+        BatchedIter::new(&self.archetypes, batch_size, state)
     }
 
     /// Prepare a read only query against a single entity
@@ -349,15 +414,29 @@ impl World {
     /// let (number, flag) = world.query_one::<(&i32, &bool)>(a).unwrap();
     /// assert_eq!(*number, 123);
     /// ```
+    #[inline]
     pub fn query_one<Q: Query>(
         &self,
         entity: Entity,
     ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
     where
-        Q::Fetch: ReadOnlyFetch + for<'a> Fetch<'a, State = ()>
+        Q::Fetch: ReadOnlyFetch + for<'a> Fetch<'a, State = ()>,
+    {
+        self.query_one_stateful::<Q, ()>(entity, &())
+    }
+
+    /// See [`query_one_mut`], except that this allows you to pass in query state if the query
+    /// supports it.
+    pub fn query_one_stateful<'s, Q: Query, S>(
+        &self,
+        entity: Entity,
+        state: &'s S,
+    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
+    where
+        Q::Fetch: ReadOnlyFetch + for<'a> Fetch<'a, State = S>,
     {
         // SAFE: read-only access to world and read only query prevents mutable access
-        unsafe { self.query_one_unchecked::<Q>(entity) }
+        unsafe { self.query_one_unchecked_stateful::<Q, S>(entity, state) }
     }
 
     /// Prepare a query against a single entity
@@ -374,15 +453,30 @@ impl World {
     /// if *flag { *number *= 2; }
     /// assert_eq!(*number, 246);
     /// ```
+    #[inline]
     pub fn query_one_mut<Q: Query>(
         &mut self,
         entity: Entity,
     ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
     where
-        Q::Fetch: for<'a> Fetch<'a, State = ()>
+        Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    {
+        self.query_one_mut_stateful::<Q, ()>(entity, &())
+    }
+
+    /// See [`query_one_mut`], except that this allows you to pass in query state if the query
+    /// supports it.
+    #[inline]
+    pub fn query_one_mut_stateful<'s, Q: Query, S>(
+        &mut self,
+        entity: Entity,
+        state: &'s S,
+    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = S>,
     {
         // SAFE: unique mutable access to world
-        unsafe { self.query_one_unchecked::<Q>(entity) }
+        unsafe { self.query_one_unchecked_stateful::<Q, S>(entity, state) }
     }
 
     /// Prepare a query against a single entity, without checking the safety of mutable queries
@@ -392,6 +486,7 @@ impl World {
     /// # Safety
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
+    #[inline]
     pub unsafe fn query_one_unchecked<Q: Query>(
         &self,
         entity: Entity,
@@ -399,10 +494,23 @@ impl World {
     where
         Q::Fetch: for<'a> Fetch<'a, State = ()>,
     {
+        self.query_one_unchecked_stateful::<Q, ()>(entity, &())
+    }
+
+    /// See [`query_one_unchecked`], except that this allows you to pass in query state if the query
+    /// supports it.
+    pub unsafe fn query_one_unchecked_stateful<'s, Q: Query, S>(
+        &self,
+        entity: Entity,
+        state: &'s S,
+    ) -> Result<<Q::Fetch as Fetch>::Item, NoSuchEntity>
+    where
+        Q::Fetch: for<'a> Fetch<'a, State = S>,
+    {
         let loc = self.entities.get(entity)?;
-        <Q::Fetch as Fetch>::get(&(), &self.archetypes[loc.archetype as usize], 0)
-            .filter(|fetch| !fetch.should_skip(&(), loc.index))
-            .map(|fetch| fetch.fetch(&(), loc.index))
+        <Q::Fetch as Fetch>::get(state, &self.archetypes[loc.archetype as usize], 0)
+            .filter(|fetch| !fetch.should_skip(state, loc.index))
+            .map(|fetch| fetch.fetch(state, loc.index))
             .ok_or(NoSuchEntity)
     }
 

@@ -32,9 +32,6 @@ use core::{
 };
 use std::collections::HashMap;
 
-#[cfg(feature = "dynamic-api")]
-use std::collections::HashSet;
-
 use crate::{borrow::AtomicBorrow, Component};
 
 /// A collection of entities having the same component types
@@ -623,9 +620,3 @@ impl Hasher for ComponentIdHasher {
 /// hashbrown needs), there is no need to hash it again. Instead, this uses the much faster no-op
 /// hash.
 pub(crate) type ComponentIdMap<V> = HashMap<ComponentId, V, BuildHasherDefault<ComponentIdHasher>>;
-
-/// A HashSet with ComponentId keys
-///
-/// Serves the same purpose as [`ComponentIdMap`], but for a Set
-#[cfg(feature = "dynamic-api")]
-pub(crate) type ComponentIdSet = HashSet<ComponentId, BuildHasherDefault<ComponentIdHasher>>;

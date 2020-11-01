@@ -644,14 +644,15 @@ struct ChunkInfo<Q: Query> {
 }
 
 /// Iterator over the set of entities with the components in `Q`
-pub struct QueryIter<'w, Q: Query> {
+pub struct QueryIter<'s, 'w, Q: Query, S> {
     archetypes: &'w [Archetype],
     archetype_index: usize,
     chunk_info: ChunkInfo<Q>,
     chunk_position: usize,
+    state: &'s S,
 }
 
-impl<'w, Q: Query> QueryIter<'w, Q> {
+impl<'s, 'w, Q: Query, S> QueryIter<'s, 'w, Q, S> {
     // #[allow(clippy::declare_interior_mutable_const)] // no trait bounds on const fns
     // const EMPTY: Q::Fetch = Q::Fetch::DANGLING;
     const EMPTY: ChunkInfo<Q> = ChunkInfo {
@@ -661,19 +662,20 @@ impl<'w, Q: Query> QueryIter<'w, Q> {
 
     /// Creates a new QueryIter
     #[inline]
-    pub(crate) fn new(archetypes: &'w [Archetype]) -> Self {
+    pub(crate) fn new(archetypes: &'w [Archetype], state: &'s S) -> Self {
         Self {
             archetypes,
             archetype_index: 0,
             chunk_info: Self::EMPTY,
             chunk_position: 0,
+            state,
         }
     }
 }
 
-impl<'w, Q: Query> Iterator for QueryIter<'w, Q>
+impl<'s, 'w, Q: Query, S> Iterator for QueryIter<'s, 'w, Q, S>
 where
-    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    Q::Fetch: for<'a> Fetch<'a, State = S>,
 {
     type Item = <Q::Fetch as Fetch<'w>>::Item;
 
@@ -685,7 +687,7 @@ where
                     let archetype = self.archetypes.get(self.archetype_index)?;
                     self.archetype_index += 1;
                     self.chunk_position = 0;
-                    self.chunk_info = Q::Fetch::get(&(), archetype, 0)
+                    self.chunk_info = Q::Fetch::get(self.state, archetype, 0)
                         .map(|fetch| ChunkInfo {
                             fetch,
                             len: archetype.len(),
@@ -697,7 +699,7 @@ where
                 if self
                     .chunk_info
                     .fetch
-                    .should_skip(&(), self.chunk_position as usize)
+                    .should_skip(self.state, self.chunk_position as usize)
                 {
                     self.chunk_position += 1;
                     continue;
@@ -706,7 +708,7 @@ where
                 let item = Some(
                     self.chunk_info
                         .fetch
-                        .fetch(&(), self.chunk_position as usize),
+                        .fetch(self.state, self.chunk_position as usize),
                 );
                 self.chunk_position += 1;
                 return item;
@@ -717,28 +719,29 @@ where
 
 // if the Fetch is an UnfilteredFetch, then we can cheaply compute the length of the query by getting
 // the length of each matching archetype
-impl<'w, Q: Query> ExactSizeIterator for QueryIter<'w, Q>
+impl<'s, 'w, Q: Query, S> ExactSizeIterator for QueryIter<'s, 'w, Q, S>
 where
-    Q::Fetch: UnfilteredFetch + for<'a> Fetch<'a, State = ()>,
+    Q::Fetch: UnfilteredFetch + for<'a> Fetch<'a, State = S>,
 {
     fn len(&self) -> usize {
         self.archetypes
             .iter()
-            .filter(|&archetype| unsafe { Q::Fetch::get(&(), archetype, 0).is_some() })
+            .filter(|&archetype| unsafe { Q::Fetch::get(self.state, archetype, 0).is_some() })
             .map(|x| x.len())
             .sum()
     }
 }
 
-struct ChunkIter<Q: Query> {
+struct ChunkIter<'s, Q: Query, S> {
     fetch: Q::Fetch,
     position: usize,
     len: usize,
+    state: &'s S,
 }
 
-impl<Q: Query> ChunkIter<Q>
+impl<'s, Q: Query, S> ChunkIter<'s, Q, S>
 where
-    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    Q::Fetch: for<'a> Fetch<'a, State = S>,
 {
     unsafe fn next<'a>(&mut self) -> Option<<Q::Fetch as Fetch<'a>>::Item> {
         loop {
@@ -746,12 +749,12 @@ where
                 return None;
             }
 
-            if self.fetch.should_skip(&(), self.position as usize) {
+            if self.fetch.should_skip(self.state, self.position as usize) {
                 self.position += 1;
                 continue;
             }
 
-            let item = Some(self.fetch.fetch(&(), self.position as usize));
+            let item = Some(self.fetch.fetch(self.state, self.position as usize));
             self.position += 1;
             return item;
         }
@@ -759,34 +762,36 @@ where
 }
 
 /// Batched version of `QueryIter`
-pub struct BatchedIter<'w, Q: Query> {
+pub struct BatchedIter<'s, 'w, Q: Query, S> {
     archetypes: &'w [Archetype],
     archetype_index: usize,
     batch_size: usize,
     batch: usize,
+    state: &'s S,
     _marker: PhantomData<Q>,
 }
 
-impl<'w, Q: Query> BatchedIter<'w, Q> {
-    pub(crate) fn new(archetypes: &'w [Archetype], batch_size: usize) -> Self {
+impl<'s, 'w, Q: Query, S> BatchedIter<'s, 'w, Q, S> {
+    pub(crate) fn new(archetypes: &'w [Archetype], batch_size: usize, state: &'s S) -> Self {
         Self {
             archetypes,
             archetype_index: 0,
             batch_size,
             batch: 0,
+            state,
             _marker: Default::default(),
         }
     }
 }
 
-unsafe impl<'w, Q: Query> Send for BatchedIter<'w, Q> {}
-unsafe impl<'w, Q: Query> Sync for BatchedIter<'w, Q> {}
+unsafe impl<'s, 'w, Q: Query, S> Send for BatchedIter<'s, 'w, Q, S> {}
+unsafe impl<'s, 'w, Q: Query, S> Sync for BatchedIter<'s, 'w, Q, S> {}
 
-impl<'w, Q: Query> Iterator for BatchedIter<'w, Q>
+impl<'s, 'w, Q: Query, S: 's> Iterator for BatchedIter<'s, 'w, Q, S>
 where
-    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    Q::Fetch: for<'a> Fetch<'a, State = S>,
 {
-    type Item = Batch<'w, Q>;
+    type Item = Batch<'s, 'w, Q, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -797,7 +802,7 @@ where
                 self.batch = 0;
                 continue;
             }
-            if let Some(fetch) = unsafe { Q::Fetch::get(&(), archetype, offset) } {
+            if let Some(fetch) = unsafe { Q::Fetch::get(self.state, archetype, offset) } {
                 self.batch += 1;
                 return Some(Batch {
                     _marker: PhantomData,
@@ -805,6 +810,7 @@ where
                         fetch,
                         position: 0,
                         len: self.batch_size.min(archetype.len() - offset),
+                        state: self.state,
                     },
                 });
             } else {
@@ -820,14 +826,14 @@ where
 }
 
 /// A sequence of entities yielded by `BatchedIter`
-pub struct Batch<'q, Q: Query> {
+pub struct Batch<'s, 'q, Q: Query, S> {
     _marker: PhantomData<&'q ()>,
-    state: ChunkIter<Q>,
+    state: ChunkIter<'s, Q, S>,
 }
 
-impl<'q, 'w, Q: Query> Iterator for Batch<'q, Q>
+impl<'s, 'q, 'w, Q: Query, S> Iterator for Batch<'s, 'q, Q, S>
 where
-    Q::Fetch: for<'a> Fetch<'a, State = ()>,
+    Q::Fetch: for<'a> Fetch<'a, State = S>,
 {
     type Item = <Q::Fetch as Fetch<'q>>::Item;
 
@@ -837,8 +843,8 @@ where
     }
 }
 
-unsafe impl<'q, Q: Query> Send for Batch<'q, Q> {}
-unsafe impl<'q, Q: Query> Sync for Batch<'q, Q> {}
+unsafe impl<'s, 'q, Q: Query, S> Send for Batch<'s, 'q, Q, S> {}
+unsafe impl<'s, 'q, Q: Query, S> Sync for Batch<'q, 's, Q, S> {}
 
 macro_rules! tuple_impl {
     ($($name: ident),*) => {
