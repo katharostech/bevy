@@ -18,7 +18,7 @@ use crate::{
 };
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
-use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsage};
+use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
 
 // Plugins that contribute to the RenderGraph should use the following label conventions:
 // 1. Graph modules should have a NAME, input module, and node module (where relevant)
@@ -196,7 +196,7 @@ pub fn prepare_core_views_system(
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Depth32Float, /* PERF: vulkan docs recommend using 24
                                                       * bit depth for better performance */
-                usage: TextureUsage::RENDER_ATTACHMENT,
+                usage: TextureUsages::RENDER_ATTACHMENT,
             },
         );
         commands.entity(entity).insert(ViewDepthTexture {

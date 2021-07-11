@@ -4,7 +4,7 @@ use bevy_utils::{tracing::error, BoxedFuture};
 use naga::{valid::ModuleInfo, Module, ShaderStage};
 use std::{borrow::Cow, collections::HashMap, marker::Copy};
 use thiserror::Error;
-use wgpu::{ShaderFlags, ShaderModuleDescriptor, ShaderSource};
+use wgpu::{ShaderModuleDescriptor, ShaderSource};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct ShaderId(Uuid);
@@ -143,7 +143,6 @@ impl AssetLoader for ShaderLoader {
 impl<'a> From<&'a Shader> for ShaderModuleDescriptor<'a> {
     fn from(shader: &'a Shader) -> Self {
         ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
             label: None,
             source: match shader {
                 Shader::Wgsl(source) => ShaderSource::Wgsl(source.clone()),
